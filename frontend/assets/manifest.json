@@ -1,0 +1,373 @@
+{
+ "atlas": "sprites.png",
+ "frames": {
+  "charger/attack": {
+   "dh": 53,
+   "dw": 53,
+   "h": 106,
+   "w": 106,
+   "x": 0,
+   "y": 0
+  },
+  "charger/base": {
+   "dh": 53,
+   "dw": 53,
+   "h": 106,
+   "w": 106,
+   "x": 106,
+   "y": 0
+  },
+  "charger/coil": {
+   "dh": 53,
+   "dw": 53,
+   "h": 106,
+   "w": 106,
+   "x": 212,
+   "y": 0
+  },
+  "charger/lunge": {
+   "dh": 53,
+   "dw": 53,
+   "h": 106,
+   "w": 106,
+   "x": 318,
+   "y": 0
+  },
+  "charger/walkA": {
+   "dh": 53,
+   "dw": 53,
+   "h": 106,
+   "w": 106,
+   "x": 424,
+   "y": 0
+  },
+  "charger/walkB": {
+   "dh": 53,
+   "dw": 53,
+   "h": 106,
+   "w": 106,
+   "x": 530,
+   "y": 0
+  },
+  "charger/walkC": {
+   "dh": 53,
+   "dw": 53,
+   "h": 106,
+   "w": 106,
+   "x": 636,
+   "y": 0
+  },
+  "charger/walkD": {
+   "dh": 53,
+   "dw": 53,
+   "h": 106,
+   "w": 106,
+   "x": 742,
+   "y": 0
+  },
+  "ninja/crouch": {
+   "dh": 50,
+   "dw": 69,
+   "h": 100,
+   "w": 138,
+   "x": 0,
+   "y": 106
+  },
+  "ninja/crouchThrow": {
+   "dh": 50,
+   "dw": 69,
+   "h": 100,
+   "w": 138,
+   "x": 138,
+   "y": 106
+  },
+  "ninja/draw": {
+   "dh": 50,
+   "dw": 69,
+   "h": 100,
+   "w": 138,
+   "x": 276,
+   "y": 106
+  },
+  "ninja/idle": {
+   "dh": 50,
+   "dw": 69,
+   "h": 100,
+   "w": 138,
+   "x": 414,
+   "y": 106
+  },
+  "ninja/idleB": {
+   "dh": 50,
+   "dw": 69,
+   "h": 100,
+   "w": 138,
+   "x": 552,
+   "y": 106
+  },
+  "ninja/jump": {
+   "dh": 50,
+   "dw": 69,
+   "h": 100,
+   "w": 138,
+   "x": 690,
+   "y": 106
+  },
+  "ninja/land": {
+   "dh": 50,
+   "dw": 69,
+   "h": 100,
+   "w": 138,
+   "x": 828,
+   "y": 106
+  },
+  "ninja/slash": {
+   "dh": 50,
+   "dw": 69,
+   "h": 100,
+   "w": 138,
+   "x": 966,
+   "y": 106
+  },
+  "ninja/throw": {
+   "dh": 50,
+   "dw": 69,
+   "h": 100,
+   "w": 138,
+   "x": 0,
+   "y": 206
+  },
+  "ninja/walkA": {
+   "dh": 50,
+   "dw": 69,
+   "h": 100,
+   "w": 138,
+   "x": 138,
+   "y": 206
+  },
+  "ninja/walkB": {
+   "dh": 50,
+   "dw": 69,
+   "h": 100,
+   "w": 138,
+   "x": 276,
+   "y": 206
+  },
+  "ninja/walkC": {
+   "dh": 50,
+   "dw": 69,
+   "h": 100,
+   "w": 138,
+   "x": 414,
+   "y": 206
+  },
+  "ninja/walkD": {
+   "dh": 50,
+   "dw": 69,
+   "h": 100,
+   "w": 138,
+   "x": 552,
+   "y": 206
+  },
+  "rusher/base": {
+   "dh": 48,
+   "dw": 48,
+   "h": 96,
+   "w": 96,
+   "x": 0,
+   "y": 306
+  },
+  "rusher/coil": {
+   "dh": 48,
+   "dw": 48,
+   "h": 96,
+   "w": 96,
+   "x": 96,
+   "y": 306
+  },
+  "rusher/leap": {
+   "dh": 48,
+   "dw": 48,
+   "h": 96,
+   "w": 96,
+   "x": 192,
+   "y": 306
+  },
+  "rusher/walkA": {
+   "dh": 48,
+   "dw": 48,
+   "h": 96,
+   "w": 96,
+   "x": 288,
+   "y": 306
+  },
+  "rusher/walkB": {
+   "dh": 48,
+   "dw": 48,
+   "h": 96,
+   "w": 96,
+   "x": 384,
+   "y": 306
+  },
+  "rusher/walkC": {
+   "dh": 48,
+   "dw": 48,
+   "h": 96,
+   "w": 96,
+   "x": 480,
+   "y": 306
+  },
+  "rusher/walkD": {
+   "dh": 48,
+   "dw": 48,
+   "h": 96,
+   "w": 96,
+   "x": 576,
+   "y": 306
+  },
+  "rusher/wallGrab": {
+   "dh": 48,
+   "dw": 48,
+   "h": 96,
+   "w": 96,
+   "x": 672,
+   "y": 306
+  },
+  "rusher/wallOver": {
+   "dh": 48,
+   "dw": 48,
+   "h": 96,
+   "w": 96,
+   "x": 0,
+   "y": 402
+  },
+  "warden/aim": {
+   "dh": 46,
+   "dw": 64,
+   "h": 92,
+   "w": 128,
+   "x": 0,
+   "y": 498
+  },
+  "warden/base": {
+   "dh": 46,
+   "dw": 64,
+   "h": 92,
+   "w": 128,
+   "x": 128,
+   "y": 498
+  },
+  "warden/coil": {
+   "dh": 46,
+   "dw": 64,
+   "h": 92,
+   "w": 128,
+   "x": 256,
+   "y": 498
+  },
+  "warden/duck": {
+   "dh": 46,
+   "dw": 64,
+   "h": 92,
+   "w": 128,
+   "x": 384,
+   "y": 498
+  },
+  "warden/sweep": {
+   "dh": 46,
+   "dw": 64,
+   "h": 92,
+   "w": 128,
+   "x": 512,
+   "y": 498
+  },
+  "warden/walkA": {
+   "dh": 46,
+   "dw": 64,
+   "h": 92,
+   "w": 128,
+   "x": 640,
+   "y": 498
+  },
+  "warden/walkB": {
+   "dh": 46,
+   "dw": 64,
+   "h": 92,
+   "w": 128,
+   "x": 768,
+   "y": 498
+  },
+  "warden/walkC": {
+   "dh": 46,
+   "dw": 64,
+   "h": 92,
+   "w": 128,
+   "x": 896,
+   "y": 498
+  },
+  "warden/walkD": {
+   "dh": 46,
+   "dw": 64,
+   "h": 92,
+   "w": 128,
+   "x": 0,
+   "y": 590
+  }
+ },
+ "meta": {
+  "bodyPx": 96,
+  "characters": {
+   "charger": {
+    "bodyLuma": 130.9,
+    "frame": {
+     "dh": 53,
+     "dw": 53,
+     "h": 106,
+     "w": 106
+    },
+    "pack": "freeknight",
+    "poses": 8
+   },
+   "ninja": {
+    "bodyLuma": 79.7,
+    "frame": {
+     "dh": 50,
+     "dw": 69,
+     "h": 100,
+     "w": 138
+    },
+    "pack": "ninjaadventurenew",
+    "poses": 13
+   },
+   "rusher": {
+    "bodyLuma": 136.2,
+    "frame": {
+     "dh": 48,
+     "dw": 48,
+     "h": 96,
+     "w": 96
+    },
+    "pack": "ninjagirlnew",
+    "poses": 9
+   },
+   "warden": {
+    "bodyLuma": 168.0,
+    "frame": {
+     "dh": 46,
+     "dw": 64,
+     "h": 92,
+     "w": 128
+    },
+    "pack": "ninjaadventurenew",
+    "poses": 9
+   }
+  },
+  "generator": "frontend/tools/pack_assets.py",
+  "licence": "CC0 / public domain (gameart2d.com freebies)",
+  "sources": [
+   "freeknight",
+   "ninjaadventurenew",
+   "ninjagirlnew"
+  ]
+ }
+}

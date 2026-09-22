@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Shinobi Alley</title>
+<title>Neon Shinobi</title>
 <style>
   html, body {
     margin: 0; height: 100%; background: #1B2433;
@@ -25,7 +25,12 @@
 "use strict";
 
 /* ===========================================================================
-   Shinobi Alley - 400-tile stage, forward-only ninja action
+   Neon Shinobi - 400-tile stage, forward-only action
+
+   ONE NAME. This file used to carry three: "Shinobi Alley" in the document
+   title, "CLAWD JUMP" on the title screen, and a third in the README. Three
+   names is three games, and none of them described the one that exists -- a
+   cast of armoured shinobi cutting down a neon-lit alley at night.
    Single file, no external libraries, no external assets.
 
    CONTROLS   ArrowRight run (forward only)   ArrowDown crouch
@@ -285,6 +290,21 @@ const SLASH_W = 46, SLASH_TOP = 46, SLASH_BOT = 4;
    hitbox so the widest point of the arc is always the furthest point the box
    can reach, whatever SLASH_W becomes. */
 const ARC_CY = 26, ARC_RY = 38, ARC_THICK = 8;
+/* The cut's colour ramp, blade-first. NAMED, because the suite counts the
+   sweep's rects by colour -- it is the only way to tell the travelling band
+   apart from the impact star that replaces it -- and two passes of retuning
+   these values silently broke four assertions that had the old literals typed
+   into them. A constant cannot drift out of sync with a test that imports it.
+
+   White at the edge, then cyan, azure and violet down the trail: the value
+   still falls monotonically backwards, so it reads as one motion, and the hue
+   rides on a gradient that was already there. A white-and-pale-blue cut was
+   the only effect in the game with no colour in it, next to a wall lit by pink
+   and cyan signs. */
+const ARC_LEAD = "#FFFFFF";
+const ARC_NEAR = "#A8F6FF";
+const ARC_MID  = "rgba(79,184,255,0.88)";
+const ARC_TAIL = "rgba(140,104,255,0.52)";
 
 
 // Death is a freeze frame, not an explosion. A short beat in full colour so the
@@ -307,14 +327,30 @@ const ARC_CY = 26, ARC_RY = 38, ARC_THICK = 8;
    The offsets are driven by a frame counter through two out-of-phase sines
    rather than by Math.random(): noise at 60Hz reads as noise, and a frame-dump
    tool cannot photograph noise the same way twice. */
-const TRAUMA_DECAY = 3.6;        // full trauma is spent in ~0.28s
-const SHAKE_PX = 7;              // amplitude at full trauma
-const PUNCH_PX = 6, PUNCH_DECAY = 9.0;
-const TRAUMA_BLADE = 0.62, TRAUMA_SHURIKEN = 0.42, TRAUMA_LAND = 0.16;
+/* TONED DOWN once it was on screen. The first pass was tuned by reading the
+   numbers rather than by playing them, and at 7px of shake plus a 6px shove per
+   kill the alley moved more than the ninja did -- in a forward-only game where
+   every kill happens at arm's length, that is a screen that never settles.
+
+   Roughly 45% off across the board. What is deliberately NOT reduced is the
+   RATIO between the weapons: the blade still lands harder than the throw, which
+   is the thing the tiering exists for. Only the absolute amount changed. */
+const TRAUMA_DECAY = 4.4;        // full trauma is spent in ~0.23s, was ~0.28s
+const SHAKE_PX = 4;              // amplitude at full trauma, was 7
+const PUNCH_PX = 3, PUNCH_DECAY = 11.0;
+const TRAUMA_BLADE = 0.34, TRAUMA_SHURIKEN = 0.20, TRAUMA_LAND = 0.08;
 /* HITSTOP IS TIERED. One value for every kill made a shuriken from across the
    alley land as hard as a katana at arm's length, which flattens the whole
    weapon choice. The blade gets two more frames than the throw. */
-const FREEZE_BLADE = 5 / 60, FREEZE_SHURIKEN = 3 / 60;
+const FREEZE_BLADE = 4 / 60, FREEZE_SHURIKEN = 2 / 60;
+/* The tint's STRENGTH and its DURATION are separate numbers, which they were
+   not before -- the alpha was derived from the time remaining, so turning the
+   tint down also shortened it, and it went out inside the hitstop it came with.
+   A tint entirely consumed by its own freeze is never seen as a tint; it just
+   becomes part of the stop. So the duration stays comfortably longer than
+   FREEZE_BLADE and the gain carries the reduction: peak alpha falls from 0.23
+   to 0.12, which is the part that was too much. */
+const FLASH_GAIN = 0.85, FLASH_MAX = 0.40;
 // Two frames of flat white where the body was. The oldest trick in fighting
 // games and still the cheapest way to make a hit land.
 const IMPACT_TIME = 2 / 60;
@@ -2519,6 +2555,22 @@ const WARDEN_DUCK = [
 /* Poses are now nested per kind, because the kinds no longer share a body.
    enemyPoseOf() returns the LOCAL name and drawEntities() looks it up under the
    enemy's own kind.                                                         */
+/* WHAT THE THREE OF THEM ARE CALLED.
+   The code's own names -- charger, rusher, warden -- describe BEHAVIOUR and are
+   the right identifiers for the AI to be written against, so they stay. But
+   they were never shown to the player, and with the art replaced they no longer
+   describe what is on screen either: the "charger" is a plumed, shielded slab
+   of a body and the "warden" throws crescents of steel.
+
+   These are the display names, and they are chosen from the art rather than
+   from the state machine:
+     IRONCLAD  the heavy -- helm, plume, shield, the widest silhouette
+     SHADE     the light one -- thin, fast, comes over the wall
+     GLAIVE    the thrower -- the arcs of steel it puts down the alley
+   Kept next to ENEMY_POSES so a kind can never gain art without gaining a
+   name. */
+const FOE_NAMES = { charger: "IRONCLAD", rusher: "SHADE", warden: "GLAIVE" };
+
 const ENEMY_POSES = {
   charger: {
     base: CHARGER_BASE, walkA: CHARGER_WALKA, walkB: CHARGER_WALKB,
@@ -3513,53 +3565,96 @@ function synth_sfxDash() {
    the frame loop, so the loop neither drifts nor stutters when a frame runs
    long, and the mode decides whether it plays so there is one source of truth
    rather than start/stop calls scattered through every transition.          */
-const MUSIC_BPM = 108;
-const MUSIC_STEP = 60 / MUSIC_BPM / 2;            // eighth notes, ~0.278s
+/* THE LOOP DRIVES NOW, AND THAT REVERSES A DELIBERATE DECISION.
+   What was here was tuned to be calm on purpose: 108bpm was picked as "the
+   walking pace between 132 driving and 84 lullaby", the progression was A
+   NATURAL minor specifically so it could never lean on a leading tone, the hat
+   was replaced with one soft brush per bar because a hi-hat "is a drive device,
+   the exact opposite of the brief", and the melody was fourteen notes across
+   four bars because "a phrase is mostly silence".
+
+   All of that is good reasoning about a calm loop, and the brief changed: this
+   is an action game about cutting your way down an alley, and a calm loop under
+   it reads as indifference.
+
+   What drives it is the RHYTHM SECTION, not a denser tune. That distinction is
+   the one lesson from the old version worth keeping -- its first incarnation put
+   a note on all 32 subdivisions and "a note on every subdivision is not a
+   phrase, it is a sequence of beeps". So: 148bpm, an eighth-note bass
+   ostinato, and a kit with a backbeat, while the MELODY still rests more than
+   it plays. Energy from the floor up. */
+const MUSIC_BPM = 148;
+const MUSIC_STEP = 60 / MUSIC_BPM / 2;            // eighth notes, ~0.203s
 const MUSIC_BAR = 8;                              // eighths in a bar
-const MUSIC_LEN = 64;                             // EIGHT bars, ~17.8s
+const MUSIC_LEN = 64;                             // EIGHT bars, ~13.0s
 const MUSIC_LOOKAHEAD = 0.5;
 
-/* i - VI - III - VII in A NATURAL minor: Am, F, C, G. About the calmest
-   diatonic loop there is, and it turns over without ever leaning on a leading
-   tone -- the old loop was A HARMONIC minor specifically so it could lean on
-   G#, because it was built to sound urgent. */
+/* A section i - VI - VII - V, B section iv - III - VI - V, in A minor.
+   Two chords per half now reach for the dominant instead of one, and V lands on
+   the last bar of BOTH halves -- so the loop pulls twice as often as it did.
+   E major is still the only chord carrying G#, the leading tone, which is the
+   single note in the key that actually wants to resolve; the difference is how
+   often the loop asks it to. */
 const MUSIC_CHORDS = [
-  // A section, bars 1-4: i - VI - III - VII. Settled, turns over on itself.
+  // A section, bars 1-4: i - VI - VII - V. Climbs to the dominant and turns.
   { bass: 110.00, notes: [220.00, 261.63, 329.63] },   // Am : A2 / A3 C4 E4
   { bass:  87.31, notes: [174.61, 220.00, 261.63] },   // F  : F2 / F3 A3 C4
-  { bass: 130.81, notes: [196.00, 261.63, 329.63] },   // C  : C3 / G3 C4 E4
   { bass:  98.00, notes: [196.00, 246.94, 293.66] },   // G  : G2 / G3 B3 D4
-  /* B section, bars 5-8: iv - i - VI - V. THE TURN.
+  { bass:  82.41, notes: [164.81, 207.65, 246.94] },   // E  : E2 / E3 G#3 B3
+  /* B section, bars 5-8: iv - III - VI - V. THE TURN.
      A four-bar loop with one progression has no shape -- it is a texture, and
-     after three passes the ear stops hearing it as music and starts hearing it
-     as a background process. Eight bars in two halves give it a beginning and a
-     middle: the B half drops to the subdominant, which is the darkest place in
-     the key, and comes back through E -- the only chord in here that carries
-     the leading tone, and the only one that actually WANTS to resolve. That
-     pull back into bar 1 is the inflection; nothing else in the loop has one. */
+     after three passes the ear stops hearing music and starts hearing a
+     background process. Eight bars in two halves give it a beginning and a
+     middle: the B half opens on the subdominant, which is the darkest place in
+     the key, and comes back through E again. */
   { bass:  73.42, notes: [146.83, 174.61, 220.00] },   // Dm : D2 / D3 F3 A3
-  { bass: 110.00, notes: [220.00, 261.63, 329.63] },   // Am
+  { bass: 130.81, notes: [196.00, 261.63, 329.63] },   // C  : C3 / G3 C4 E4
   { bass:  87.31, notes: [174.61, 220.00, 261.63] },   // F
-  { bass:  82.41, notes: [164.81, 207.65, 246.94] }    // E  : E2 / E3 G#3 B3
+  { bass:  82.41, notes: [164.81, 207.65, 246.94] }    // E
 ];
 
-/* [step, pitch, length in eighths]. Fourteen notes across four bars, against
-   the thirty-two the old loop played. Every pitch is a chord tone of the bar it
-   lands in, so the line never has to be resolved and never fights the pad. */
+/* THE BASS OSTINATO -- the actual engine of the thing.
+   Semitone offsets from each bar's root, one per eighth. The old loop played
+   one bass note per bar and held it, which is a pad with a low note in it; a
+   pumping eighth-note root is what a player hears as tempo.
+
+   Only 0, 7 and 12 appear -- root, fifth, octave -- because those three are
+   diatonic against EVERY chord in the loop. An offset of 10 would have been a
+   nice riff over Am and an E-flat over F. */
+const MUSIC_BASS = [0, 0, 12, 0, 0, 7, 0, 12];
+
+/* THE KIT, as step indices inside a bar of eight eighths.
+   The kick's 3 is the whole pattern: a kick on 0 and 4 alone is a metronome,
+   and the extra one an eighth before the halfway point is what makes it push.
+   The snare is a plain backbeat, which is what the ear locks to. */
+const MUSIC_KICK  = [0, 3, 4];
+const MUSIC_SNARE = [2, 6];
+const MUSIC_HAT   = [1, 5, 7];
+
+/* [step, pitch, length in eighths]. Thirty-one notes across eight bars -- so
+   still fewer notes than there are steps, and still mostly silence, which is
+   the one thing about the calm version worth carrying over. The energy is in
+   the bass and the kit; a tune that also filled every subdivision would just be
+   loud.
+
+   What changed is the SHAPE. Notes come in ones and twos on the front of each
+   bar and then get out of the way, which is a figure rather than a line, and
+   every bar ends on the space where the next kick lands. Each pitch is still a
+   chord tone of the bar it falls in. */
 const MUSIC_MELODY = [
-  // A section: long notes, chord tones, mostly rests.
-  [ 0, 329.63, 3], [ 3, 440.00, 1], [ 4, 523.25, 2], [ 6, 440.00, 2],
-  [ 8, 523.25, 3], [11, 440.00, 1], [12, 349.23, 4],
-  [16, 392.00, 2], [18, 523.25, 2], [20, 329.63, 2], [22, 392.00, 2],
-  [24, 587.33, 3], [27, 493.88, 1], [28, 392.00, 4],
-  /* B section. Deliberately a different SHAPE, not just different pitches: it
-     sits a third higher, moves in twos where the A section moved in threes, and
-     climbs to its top note at bar 8 instead of settling. Repeating the A
-     melody over new chords would have been a key change with no tune in it. */
-  [32, 349.23, 2], [34, 440.00, 2], [36, 523.25, 2], [38, 587.33, 2],
-  [40, 659.25, 3], [43, 523.25, 1], [44, 440.00, 4],
-  [48, 349.23, 2], [50, 523.25, 2], [52, 440.00, 4],
-  [56, 659.25, 2], [58, 587.33, 2], [60, 493.88, 4]   // B4 -> pulls to A
+  // A: Am, F, G, E -- figures on the front of the bar, then air.
+  [ 0, 659.25, 1], [ 1, 523.25, 1], [ 2, 440.00, 2], [ 6, 880.00, 2],
+  [ 8, 698.46, 1], [ 9, 523.25, 1], [10, 440.00, 2], [14, 698.46, 2],
+  [16, 783.99, 1], [17, 587.33, 1], [18, 493.88, 2],
+  [24, 659.25, 1], [25, 830.61, 1], [26, 987.77, 2], [28, 659.25, 4],
+  /* B: Dm, C, F, E. A different shape, not a transposition -- it sits higher,
+     tops out at C6 in bar 7 where the A half topped out at B5, and its last bar
+     holds G# so the loop is pulled back into bar 1 rather than merely arriving
+     there. */
+  [32, 587.33, 1], [33, 698.46, 1], [34, 880.00, 2], [38, 440.00, 2],
+  [40, 523.25, 1], [41, 659.25, 1], [42, 783.99, 2], [46, 659.25, 2],
+  [48, 698.46, 1], [49, 880.00, 1], [50, 1046.50, 2], [54, 698.46, 2],
+  [56, 987.77, 1], [57, 830.61, 1], [58, 659.25, 2], [60, 830.61, 4]
 ];
 
 let musicNext = 0, musicStep = 0, musicOn = false;
@@ -3632,10 +3727,69 @@ function schedEcho(freq, at, dur) {
              0.06, dur * 0.5);
 }
 
-/* A soft brush on the bar line, low-passed under a kilohertz. The old loop put
-   a 6.2kHz hat on every offbeat, which is a hi-hat, which is a drive device --
-   the exact opposite of the brief. One breath per bar gives the loop a floor to
-   sit on without pushing it along. */
+/* THE KIT.
+   A note on the history, because it reverses itself twice. The first loop had a
+   6.2kHz tick on every offbeat, which was correctly diagnosed as "a hi-hat,
+   which is a drive device -- the exact opposite of the brief" and replaced with
+   one soft brush per bar. The brief is now drive, so the kit is back -- but as
+   a KIT, with a kick, a backbeat and a hat at three different jobs, rather than
+   as one tick repeating. That is the difference between a groove and a metronome
+   and it is why the first version failed.
+
+   All three run off the shared noise buffer or a single oscillator, so the whole
+   kit costs less per bar than one pad voice does. */
+function schedKick(at, peak) {
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = "sine";
+  // A pitch drop is what a kick IS: 96Hz to 42Hz in 90ms reads as a beater
+  // hitting a head, where a flat 60Hz reads as a hum.
+  o.frequency.setValueAtTime(96, at);
+  o.frequency.exponentialRampToValueAtTime(42, at + 0.09);
+  g.gain.setValueAtTime(0.0001, at);
+  g.gain.exponentialRampToValueAtTime(peak, at + 0.006);
+  g.gain.exponentialRampToValueAtTime(0.0001, at + 0.13);
+  o.connect(g); g.connect(musicGain);
+  o.start(at); o.stop(at + 0.16);
+  musicVoices.push({ o: o, g: g, until: at + 0.16 });
+}
+
+function schedSnare(at, peak) {
+  const src = actx.createBufferSource();
+  src.buffer = noiseBuf;
+  const bp = actx.createBiquadFilter();
+  bp.type = "bandpass"; bp.frequency.value = 1750; bp.Q.value = 0.9;
+  const g = actx.createGain();
+  g.gain.setValueAtTime(0.0001, at);
+  g.gain.exponentialRampToValueAtTime(peak, at + 0.004);
+  g.gain.exponentialRampToValueAtTime(0.0001, at + 0.11);
+  src.connect(bp); bp.connect(g); g.connect(musicGain);
+  src.start(at, Math.random() * 1.4, 0.16);
+  // A short low body under the noise, or it is a shaker rather than a snare.
+  const o = actx.createOscillator(), og = actx.createGain();
+  o.type = "triangle"; o.frequency.setValueAtTime(190, at);
+  og.gain.setValueAtTime(0.0001, at);
+  og.gain.exponentialRampToValueAtTime(peak * 0.5, at + 0.004);
+  og.gain.exponentialRampToValueAtTime(0.0001, at + 0.06);
+  o.connect(og); og.connect(musicGain);
+  o.start(at); o.stop(at + 0.09);
+  musicVoices.push({ o: o, g: og, until: at + 0.09 });
+}
+
+function schedHat(at, peak) {
+  const src = actx.createBufferSource();
+  src.buffer = noiseBuf;
+  const hp = actx.createBiquadFilter();
+  hp.type = "highpass"; hp.frequency.value = 7200; hp.Q.value = 0.7;
+  const g = actx.createGain();
+  g.gain.setValueAtTime(0.0001, at);
+  g.gain.exponentialRampToValueAtTime(peak, at + 0.003);
+  g.gain.exponentialRampToValueAtTime(0.0001, at + 0.045);
+  src.connect(hp); hp.connect(g); g.connect(musicGain);
+  src.start(at, Math.random() * 1.4, 0.07);
+}
+
+/* Kept, and demoted: the bar-line brush is now a wash UNDER the kit rather than
+   the only percussion there is. */
 function schedBrush(at) {
   const src = actx.createBufferSource();
   src.buffer = noiseBuf;
@@ -3673,24 +3827,41 @@ function pumpMusic() {
   if (musicNext < now) musicNext = now;
   while (musicNext < now + MUSIC_LOOKAHEAD) {
     const i = musicStep % MUSIC_LEN;
-    if (i % MUSIC_BAR === 0) {
+    const inBar = i % MUSIC_BAR;
+    const barIx = Math.floor(i / MUSIC_BAR) % MUSIC_CHORDS.length;
+    const isB = barIx >= MUSIC_CHORDS.length / 2;
+
+    /* THE RHYTHM SECTION, every eighth. This block is what the tempo change
+       actually means -- the harmony above it barely moved. */
+    const root = MUSIC_CHORDS[barIx].bass;
+    const semi = MUSIC_BASS[inBar];
+    // One oscillator, not two: the bass fires five times a second and the
+    // detuned pair the pad voices use would triple the node churn for a beating
+    // effect nothing this short is long enough to show.
+    schedVoice(root * Math.pow(2, semi / 12), musicNext, MUSIC_STEP * 0.92,
+               "square", semi === 0 ? 0.075 : 0.060, 420, 0.004,
+               MUSIC_STEP * 0.5);
+    if (MUSIC_KICK.indexOf(inBar) >= 0) schedKick(musicNext, isB ? 0.20 : 0.17);
+    if (MUSIC_SNARE.indexOf(inBar) >= 0) schedSnare(musicNext, isB ? 0.060 : 0.050);
+    if (MUSIC_HAT.indexOf(inBar) >= 0) schedHat(musicNext, inBar === 5 ? 0.024 : 0.017);
+
+    if (inBar === 0) {
       // Pad, bass and brush change once a bar and hold for all of it, so there
       // is always something sounding underneath the melody's silences. Nothing
       // in the old loop sustained past one step, which is why its rests would
       // have been holes rather than breaths.
-      const bar = (i / MUSIC_BAR) % MUSIC_CHORDS.length;
-      const chord = MUSIC_CHORDS[bar];
+      const chord = MUSIC_CHORDS[barIx];
       const span = MUSIC_STEP * MUSIC_BAR;
-      // The B half is a touch louder and a touch brighter. Dynamics across the
-      // halves are what make the turn land as a turn rather than as a chord
-      // substitution nobody notices.
-      const bHalf = bar >= MUSIC_CHORDS.length / 2;
+      /* The pad is quieter and shorter than it was. It used to be the loudest
+         thing in the loop and hold for the whole bar; with a bass and a kit
+         under it that reads as mud, so it has come down to a bed the melody
+         sits on. The B half is still a touch louder and brighter -- dynamics
+         across the halves are what make the turn land as a turn rather than as
+         a chord substitution nobody notices. */
       for (const n of chord.notes) {
-        schedVoice(n, musicNext, span * 0.98, "triangle",
-                   bHalf ? 0.050 : 0.042, bHalf ? 1700 : 1300, 0.5, 1.1);
+        schedVoice(n, musicNext, span * 0.88, "triangle",
+                   isB ? 0.036 : 0.030, isB ? 1900 : 1500, 0.10, 0.5);
       }
-      schedVoice(chord.bass, musicNext, span * 0.92, "sine", 0.115, 260,
-                 0.12, 0.6);
       schedBrush(musicNext);
     }
     for (const note of MUSIC_MELODY) {
@@ -3698,7 +3869,9 @@ function pumpMusic() {
       const dur = MUSIC_STEP * note[2];
       // A little dynamic shape. Identical velocity on every note is most of
       // what makes a sequenced line sound typed in rather than played.
-      const peak = (i % 4 === 0) ? 0.105 : 0.082;
+      // Accents on the beat. With a kit underneath, the melody needs to sit
+      // above it rather than inside it, so this is up from the calm mix.
+      const peak = (inBar % 4 === 0) ? 0.115 : 0.090;
       schedVoice(note[1], musicNext, dur * 0.96, "triangle", peak, 2600, 0.05,
                  dur * 0.55);
       schedEcho(note[1], musicNext, dur);
@@ -3767,7 +3940,23 @@ function loadArt(manifest) {
         const x = Number(f.x), y = Number(f.y), w = Number(f.w), h = Number(f.h);
         if (![x, y, w, h].every(Number.isFinite) || w <= 0 || h <= 0) continue;
         if (x < 0 || y < 0 || x + w > img.width || y + h > img.height) continue;
-        ART.frames[name] = { x: x, y: y, w: w, h: h };
+        /* SOURCE SIZE AND DRAW SIZE ARE SEPARATE, and this is what the whole
+           art upgrade rests on. Without `dw`/`dh` a frame is drawn at its own
+           pixel size in WORLD units, so 32x48 art is the only art that fits the
+           box -- and 32x48 on a 1280x720 buffer is four device pixels per art
+           pixel, which is exactly what looked coarse.
+
+           With them, 72x104 of source can be declared as 36x52 world units:
+           exactly 2:1 against RENDER_SCALE, so every source pixel lands on one
+           device pixel under nearest-neighbour. Four times the art in the same
+           space on screen.
+
+           Omitted, they fall back to w/h, so every manifest written before this
+           existed still means what it meant. */
+        const dw = f.dw === undefined ? w : Number(f.dw);
+        const dh = f.dh === undefined ? h : Number(f.dh);
+        if (![dw, dh].every(Number.isFinite) || dw <= 0 || dh <= 0) continue;
+        ART.frames[name] = { x: x, y: y, w: w, h: h, dw: dw, dh: dh };
       }
       ART.image = img;
       ART.ready = Object.keys(ART.frames).length > 0;
@@ -3798,16 +3987,20 @@ function drawPose(rows, name, sx, sy, flip, palette, cell) {
   const f = ART.ready ? ART.frames[name] : null;
   if (!f || !ART.image) { drawPixels(rows, sx, sy, flip, palette, cell); return; }
   const boxW = rows[0].length * cell, boxH = rows.length * cell;
-  const dx = Math.round(sx + (boxW - f.w) / 2);
-  const dy = Math.round(sy + (boxH - f.h));
+  // Centred horizontally and BOTTOM-aligned on the built-in box, at the draw
+  // size rather than the source size. A frame taller than the box therefore
+  // grows upward -- which is what a raised sword wants -- and the feet stay on
+  // the ground either way.
+  const dx = Math.round(sx + (boxW - f.dw) / 2);
+  const dy = Math.round(sy + (boxH - f.dh));
   if (flip) {
     ctx.save();
-    ctx.translate(dx + f.w, dy);
+    ctx.translate(dx + f.dw, dy);
     ctx.scale(-1, 1);
-    ctx.drawImage(ART.image, f.x, f.y, f.w, f.h, 0, 0, f.w, f.h);
+    ctx.drawImage(ART.image, f.x, f.y, f.w, f.h, 0, 0, f.dw, f.dh);
     ctx.restore();
   } else {
-    ctx.drawImage(ART.image, f.x, f.y, f.w, f.h, dx, dy, f.w, f.h);
+    ctx.drawImage(ART.image, f.x, f.y, f.w, f.h, dx, dy, f.dw, f.dh);
   }
 }
 
@@ -4342,8 +4535,8 @@ function killEnemy(e, silent) {
   score += SCORE_KILL;
   const pal = e.kind === "charger" ? P_CHARGER
             : e.kind === "rusher"  ? P_RUSHER : P_WARDEN;
-  spawnBurst(e.x + e.w / 2, e.y + e.h / 2, blade ? 22 : 16,
-             [pal.G, pal.H, pal.D, "#FFFFFF", "#FFE45E"], blade ? 215 : 180, 0.5);
+  spawnBurst(e.x + e.w / 2, e.y + e.h / 2, blade ? 17 : 13,
+             [pal.G, pal.H, pal.D, "#FFFFFF", "#FFE45E"], blade ? 175 : 150, 0.44);
   // Hitstop is raised, never lowered: a second kill inside the first one's
   // freeze must not cut it short.
   hitFreeze = Math.max(hitFreeze, blade ? FREEZE_BLADE : FREEZE_SHURIKEN);
@@ -4352,7 +4545,9 @@ function killEnemy(e, silent) {
   addPunch((e.x + e.w / 2) - (ninja.x + ninja.w / 2),
            (e.y + e.h / 2) - (ninja.y + ninja.h / 2) - 10,
            blade ? PUNCH_PX : PUNCH_PX * 0.6);
-  flash = blade ? 0.13 : 0.10; flashCol = "255,250,225";
+  // Duration, not strength -- FLASH_GAIN carries the cut. It has to outlive the
+  // hitstop or it is never seen as its own effect.
+  flash = blade ? 0.14 : 0.11; flashCol = "255,250,225";
   // A caller that kills several at once suppresses these: a dozen stacked kill
   // sounds is a noise blast rather than a dozen kills.
   if (!silent) sfxKill();
@@ -5184,8 +5379,8 @@ function update(dt) {
     const f = Math.min(1, (impactVy - LAND_VY) / (MAX_FALL - LAND_VY));
     addTrauma(TRAUMA_LAND * (0.45 + f));
     spawnBurst(ninja.x + ninja.w / 2, ninja.y + ninja.h - 1,
-               3 + Math.round(f * 5), ["#B6AC9A", "#8E8676", "#6A6458"],
-               60 + f * 70, 0.24);
+               2 + Math.round(f * 4), ["#B6AC9A", "#8E8676", "#6A6458"],
+               50 + f * 60, 0.22);
   }
 
   if (ninja.y > WORLD_H + 64) { killNinja(); return; }
@@ -6263,24 +6458,47 @@ function thrustStreak(x, y, dir, len, thick, cols) {
 
    `w` is windup progress 0..1, so the player reads urgency off the brightness
    and the position off the rectangle. */
-function hazardPreview(x, y, w, h, prog, col) {
-  /* HATCHED, not filled. A solid tint over a 68x40 box is a grey slab that
-     hides the alley behind it -- and the alley is where the player is looking
-     for a way out. Scan lines every four pixels mark the same ground while
-     leaving three quarters of it visible, and they read as hazard tape rather
-     than as fog. */
-  ctx.fillStyle = "rgba(" + col + "," + (0.10 + prog * 0.22).toFixed(3) + ")";
-  for (let yy = 1; yy < h; yy += 4) {
-    ctx.fillRect(Math.round(x), Math.round(y + yy), Math.round(w), 1);
-  }
-  const tick = Math.max(3, Math.round(Math.min(w, h) * 0.22));
-  ctx.fillStyle = "rgba(" + col + "," + (0.35 + prog * 0.5).toFixed(3) + ")";
-  const x0 = Math.round(x), y0 = Math.round(y);
-  const x1 = Math.round(x + w), y1 = Math.round(y + h);
-  ctx.fillRect(x0, y0, tick, 1);            ctx.fillRect(x0, y0, 1, tick);
-  ctx.fillRect(x1 - tick, y0, tick, 1);     ctx.fillRect(x1 - 1, y0, 1, tick);
-  ctx.fillRect(x0, y1 - 1, tick, 1);        ctx.fillRect(x0, y1 - tick, 1, tick);
-  ctx.fillRect(x1 - tick, y1 - 1, tick, 1); ctx.fillRect(x1 - 1, y1 - tick, 1, tick);
+function hazardPreview(x, y, w, h, prog, col, dir) {
+  /* A WIPE, not a grid.
+     Three versions of this. The first previewed the swing's whole arc at low
+     alpha, and a thin band over a half-turn closes visually into a ring -- it
+     read as a lasso being spun. The second hatched the box with scan lines
+     every four pixels, which kept the alley visible but put a literal grid on
+     the screen, and a grid is the one thing in a hand-painted alley that
+     announces itself as an overlay.
+
+     This is the same information with no pattern in it at all: the box FILLS
+     from the attacker outward as the windup runs out, behind a soft leading
+     edge. It is smooth, it has no repeating element to notice, and it says
+     something the other two did not -- WHEN, not just where, because the filled
+     fraction is the fraction of the windup that has elapsed.
+
+     Edges are half a unit (one device pixel), which is only drawable at all
+     because the buffer is 2x. */
+  const hair = 1 / RENDER_SCALE;
+  const x0 = Math.round(x * RENDER_SCALE) / RENDER_SCALE;
+  const y0 = Math.round(y * RENDER_SCALE) / RENDER_SCALE;
+  const fw = Math.max(hair, w * Math.min(1, prog));
+  // Right-facing attacks fill left-to-right; a left-facing one fills from its
+  // own body outward, which is the other edge.
+  const fx = (dir === undefined || dir > 0) ? x0 : x0 + w - fw;
+
+  ctx.fillStyle = "rgba(" + col + ",0.10)";
+  ctx.fillRect(fx, y0, fw, h);
+  ctx.fillStyle = "rgba(" + col + ",0.07)";
+  ctx.fillRect(fx, y0 + h * 0.34, fw, h * 0.32);      // a little body, no lines
+
+  // The leading edge: two soft steps, brightening as the attack nears.
+  const lead = (dir === undefined || dir > 0) ? fx + fw : fx;
+  ctx.fillStyle = "rgba(" + col + "," + (0.30 + prog * 0.45).toFixed(3) + ")";
+  ctx.fillRect(lead - hair, y0, hair * 2, h);
+  ctx.fillStyle = "rgba(" + col + "," + (0.12 + prog * 0.18).toFixed(3) + ")";
+  ctx.fillRect(lead - hair * 4, y0, hair * 3, h);
+
+  // A hairline outline so the extent is readable before the wipe reaches it.
+  ctx.fillStyle = "rgba(" + col + "," + (0.10 + prog * 0.16).toFixed(3) + ")";
+  ctx.fillRect(x0, y0, w, hair);
+  ctx.fillRect(x0, y0 + h - hair, w, hair);
 }
 
 const CHG_STEEL = ["#FFF4D8", "#FFD489", "rgba(226,150,74,0.60)"];
@@ -6345,6 +6563,25 @@ function diveTargetOf(e) {
   return { cx: cx, row: ROWS - 2 };
 }
 
+/* The same wipe, falling instead of sweeping. Worth the duplication: rotating
+   the horizontal one through a transform would put the hairlines off the device
+   grid, and a hairline that lands between pixels is a grey smear. */
+function hazardPreviewV(x, y, w, h, prog, col) {
+  const hair = 1 / RENDER_SCALE;
+  const x0 = Math.round(x * RENDER_SCALE) / RENDER_SCALE;
+  const y0 = Math.round(y * RENDER_SCALE) / RENDER_SCALE;
+  const fh = Math.max(hair, h * Math.min(1, prog));
+  ctx.fillStyle = "rgba(" + col + ",0.10)";
+  ctx.fillRect(x0, y0, w, fh);
+  ctx.fillStyle = "rgba(" + col + "," + (0.30 + prog * 0.45).toFixed(3) + ")";
+  ctx.fillRect(x0, y0 + fh - hair, w, hair * 2);
+  ctx.fillStyle = "rgba(" + col + "," + (0.12 + prog * 0.18).toFixed(3) + ")";
+  ctx.fillRect(x0, y0 + fh - hair * 4, w, hair * 3);
+  ctx.fillStyle = "rgba(" + col + "," + (0.10 + prog * 0.16).toFixed(3) + ")";
+  ctx.fillRect(x0, y0, hair, h);
+  ctx.fillRect(x0 + w - hair, y0, hair, h);
+}
+
 function drawEnemyWeapon(e) {
   const dir = e.facing > 0 ? 1 : -1;
   const feet = e.y + e.h;
@@ -6372,8 +6609,10 @@ function drawEnemyWeapon(e) {
       // No shaft when there is nothing to fall through: the pad alone says
       // "here", and eight pixels of hatching inside a cover block says nothing.
       if (gy - feet > 4) {
-        hazardPreview(tgt.cx - e.w / 2 - cam.x, feet - cam.y, e.w,
-                      gy - feet, w, "255,150,120");
+        // The drop wipes DOWNWARD, so it gets its own axis rather than being
+        // squeezed into the horizontal one.
+        hazardPreviewV(tgt.cx - e.w / 2 - cam.x, feet - cam.y, e.w,
+                       gy - feet, w, "255,150,120");
       }
       ctx.fillStyle = "rgba(255,160,120," + (0.30 + w * 0.5).toFixed(3) + ")";
       ctx.fillRect(Math.round(tgt.cx - e.w / 2 - 5 - cam.x),
@@ -6413,7 +6652,7 @@ function drawEnemyWeapon(e) {
       windupSteel(cx, cy, dir, w, rx, ry, UP, CHG_STEEL);
       hazardPreview(dir > 0 ? e.x + e.w - cam.x : e.x - CHG_HIT_W - cam.x,
                     feet - CHG_HIT_TOP - cam.y, CHG_HIT_W,
-                    CHG_HIT_TOP - CHG_HIT_BOT, w, "255,196,110");
+                    CHG_HIT_TOP - CHG_HIT_BOT, w, "255,196,110", dir);
     } else if (e.state === "swing") {
       sweepArc(cx, cy, dir, 1 - Math.max(0, e.timer) / CHG_SWING,
                rx, ry, 9, UP, Math.PI, CHG_STEEL);
@@ -6424,7 +6663,7 @@ function drawEnemyWeapon(e) {
       // The lunge covers ground, so the preview is the whole corridor it crosses.
       hazardPreview(dir > 0 ? e.x + e.w - cam.x : e.x - CHG_LUNGE_DIST - cam.x,
                     feet - LUNGE_HIT_TOP - cam.y, CHG_LUNGE_DIST,
-                    LUNGE_HIT_TOP - LUNGE_HIT_BOT, w, "255,150,90");
+                    LUNGE_HIT_TOP - LUNGE_HIT_BOT, w, "255,150,90", dir);
     } else if (e.state === "lunge") {
       thrustStreak(e.x + (dir > 0 ? e.w - 6 : 6) - cam.x,
                    feet - LUNGE_HIT_TOP + 12 - cam.y, dir,
@@ -6442,7 +6681,7 @@ function drawEnemyWeapon(e) {
       windupSteel(cx, cy, dir, w, rx, ry, -1.15, WARD_STEEL);
       hazardPreview(dir > 0 ? e.x + e.w - cam.x : e.x - WARD_SWEEP_REACH - cam.x,
                     feet - WARD_SWEEP_TOP - cam.y, WARD_SWEEP_REACH,
-                    WARD_SWEEP_TOP - WARD_SWEEP_BOT, w, "150,228,244");
+                    WARD_SWEEP_TOP - WARD_SWEEP_BOT, w, "150,228,244", dir);
     } else if (e.state === "sweep") {
       sweepArc(cx, cy, dir, 1 - Math.max(0, e.timer) / WARD_SWEEP_TIME,
                rx, ry, 8, -1.15, 1.9, WARD_STEEL);
@@ -6622,7 +6861,13 @@ function drawEntities() {
       const cx0 = Math.round(sl.x - cam.x + sl.w / 2);
       const cy0 = Math.round(sl.y - cam.y + sl.h / 2);   // the box, not the body
       const r = Math.round(7 + (1 - kk) * 20);
-      ctx.fillStyle = kk > 0.55 ? "#FFFFFF" : "#BFE0FF";
+      /* The impact star used to be white, then pale blue. It is the brightest
+         thing on screen for four frames and it was also the least interesting:
+         a white star on a white arc over a white flash is one colour event. It
+         now runs white -> gold -> ember as it expands, which is the only part
+         of the cut that is warm and therefore the part that reads as a hit
+         rather than as more steel. */
+      ctx.fillStyle = kk > 0.62 ? "#FFFFFF" : kk > 0.34 ? "#FFE98A" : "#FF9A4E";
       for (let a2 = 0; a2 < 8; a2++) {
         const th = (a2 / 8) * Math.PI * 2;
         const sx = cx0 + Math.round(Math.cos(th) * r);
@@ -6632,8 +6877,14 @@ function drawEntities() {
         else if (Math.abs(Math.sin(th)) > 0.7) ctx.fillRect(sx - 1, sy, 2, long);
         else ctx.fillRect(sx - 1, sy - 1, 3, 3);
       }
-      ctx.fillStyle = "rgba(200,232,255," + (0.30 * kk).toFixed(3) + ")";
+      // The horizontal smear behind the star, warm to match it, and additive so
+      // it lights what it crosses instead of painting over it.
+      ctx.globalCompositeOperation = "lighter";
+      ctx.fillStyle = "rgba(255,196,120," + (0.26 * kk).toFixed(3) + ")";
       ctx.fillRect(cx0 - r + 3, cy0 - 4, (r - 3) * 2, 8);
+      ctx.fillStyle = "rgba(255,120,60," + (0.16 * kk).toFixed(3) + ")";
+      ctx.fillRect(cx0 - r - 2, cy0 - 2, (r + 2) * 2, 4);
+      ctx.globalCompositeOperation = "source-over";
       continue;
     }
     /* Drawn by ANGLE, not by row, and only over the 180 degrees in front of
@@ -6649,6 +6900,31 @@ function drawEntities() {
     const dir = sl.dir;                     // fixed at the swing, never re-read
     const cx = ninja.x + ninja.w / 2 - cam.x;
     const cy = ninja.y + ninja.h - ARC_CY - cam.y;
+    /* An additive underglow, drawn BEFORE the arc and along the same ellipse.
+       Additive means it brightens the brick and the bodies the cut passes over
+       rather than laying a pale film on top of them, which is the difference
+       between a lit blade and a painted one. Three coarse steps, because a
+       smooth one bands under nearest-neighbour upscaling. */
+    {
+      const gp = 1 - kk;
+      const grx = BODY_W / 2 + sl.w - 2, gry = ARC_RY;
+      ctx.globalCompositeOperation = "lighter";
+      for (let g = 0; g < 3; g++) {
+        const gsz = 7 + g * 5;
+        ctx.fillStyle = g === 0 ? "rgba(120,220,255,0.20)"
+                      : g === 1 ? "rgba(80,150,255,0.11)"
+                                : "rgba(120,90,255,0.07)";
+        const gsteps = 20;
+        for (let i = 0; i <= gsteps; i++) {
+          const th = -Math.PI / 2 + (i / gsteps) * Math.PI;
+          if (th > -Math.PI / 2 + gp * Math.PI) break;
+          const gx = cx + dir * grx * 0.9 * Math.cos(th);
+          const gy2 = cy + gry * 0.9 * Math.sin(th);
+          ctx.fillRect(Math.round(gx - gsz / 2), Math.round(gy2 - gsz / 2), gsz, gsz);
+        }
+      }
+      ctx.globalCompositeOperation = "source-over";
+    }
     const rx = BODY_W / 2 + sl.w - 2;       // the hitbox's far edge, exactly
     const ry = ARC_RY;
     const p = 1 - kk;                        // sweep progress, 0 -> 1
@@ -6672,9 +6948,19 @@ function drawEntities() {
       const px = cx + dir * rx * mr * Math.cos(th);
       const py = cy + ry * my * Math.sin(th);
       const sz = Math.max(2, Math.round(t2));
-      ctx.fillStyle = behind < 0.06 ? "#FFFFFF"
-                    : behind < 0.26 ? "#CFE9FF"
-                    : "rgba(158,205,255,0.62)";
+      /* FOUR BANDS, NOT TWO, AND THEY HAVE A HUE.
+         The cut was white at the tip and pale blue behind it, which is what
+         steel looks like and not what a katana swung by a ninja in a neon alley
+         should look like -- it was the one effect in the game with no colour in
+         it, next to a wall lit by pink and cyan signs.
+
+         The ramp now runs white -> cyan -> azure -> violet from the blade
+         backwards. It reads as the same motion because the VALUE still falls
+         monotonically along the trail; the hue is riding on top of a gradient
+         that was already there. */
+      ctx.fillStyle = behind < 0.05 ? ARC_LEAD
+                    : behind < 0.17 ? ARC_NEAR
+                    : behind < 0.40 ? ARC_MID : ARC_TAIL;
       ctx.fillRect(Math.round(px - sz / 2), Math.round(py - sz / 2), sz, sz);
     }
   }
@@ -6985,22 +7271,51 @@ function drawTitle() {
   ctx.fillRect(84, 40, VIEW_W - 168, 2);
   ctx.fillRect(84, VIEW_H - 40, VIEW_W - 168, 2);
 
-  const t1 = "CLAWD JUMP";
-  drawTextHD(t1, (VIEW_W - textWidthHD(t1, 7)) / 2, 58, "#FFE45E", 7);
-  const t2 = "ALLEY OF THE TEN FLAGS";
-  drawTextHD(t2, (VIEW_W - textWidthHD(t2, 3)) / 2, 96, "#C9D2E0", 3);
+  const t1 = "NEON SHINOBI";
+  drawTextHD(t1, (VIEW_W - textWidthHD(t1, 7)) / 2, 54, "#FFE45E", 7);
+  const t2 = "STEEL IN THE BACK ALLEYS";
+  drawTextHD(t2, (VIEW_W - textWidthHD(t2, 3)) / 2, 92, "#C9D2E0", 3);
 
   // A score attack with no record to beat has nothing to come back for.
   const rec = bestFor(STAGE_ID);
   if (rec.score > 0 || rec.time > 0) {
     const line = "BEST " + String(Math.min(999999, rec.score)).padStart(6, "0") +
                  (rec.time > 0 ? "    " + timeText(rec.time) : "");
-    drawTextHD(line, (VIEW_W - textWidthHD(line, 3)) / 2, 112, "#9CFF7A", 3);
+    drawTextHD(line, (VIEW_W - textWidthHD(line, 3)) / 2, 108, "#9CFF7A", 3);
   }
 
-  // He breathes on the title screen, so it never reads as a still image.
-  const pose = (Math.floor(clock * 2.5) % 2) ? NINJA_IDLE_B : NINJA_IDLE;
-  drawPixels(pose, (VIEW_W - SPRITE_W) / 2, 130, false, P_NINJA, CELL_NINJA);
+  /* He breathes on the title screen, so it never reads as a still image.
+
+     drawPose, not drawPixels. These two menu sprites were the last places that
+     reached past the asset layer straight into the pixel arrays, so with an
+     atlas loaded the ninja on the title screen was a DIFFERENT CHARACTER from
+     the one in the alley -- the built-in art on one screen and the replacement
+     on the next. Anything that draws a character goes through drawPose; that is
+     the whole point of there being one function for it. */
+  /* THE LINEUP. One breathing ninja used to stand here, which told the player
+     nothing about what is down the alley -- and with four characters now drawn
+     from three different CC0 packs, "who is who" is the thing most worth saying
+     on this screen. So the roster is the logo art: the shinobi facing right,
+     the three who come at him facing left, each under its own name.
+
+     They are drawn through drawPose like everything else, so this screen shows
+     exactly the art the alley does. The last time these two disagreed, the
+     title screen was showing a different character from the game. */
+  const breathing = (Math.floor(clock * 2.5) % 2) !== 0;
+  const LINE_Y = 126, PITCH = 108;
+  const lineup = [
+    [NINJA_IDLE, breathing ? "ninja/idleB" : "ninja/idle", P_NINJA, "SHINOBI", false, "#9FD0FF"],
+    [ENEMY_POSES.charger.base, "charger/base", P_CHARGER, FOE_NAMES.charger, true, "#EFC08A"],
+    [ENEMY_POSES.rusher.base,  "rusher/base",  P_RUSHER,  FOE_NAMES.rusher,  true, "#D2ABF5"],
+    [ENEMY_POSES.warden.base,  "warden/base",  P_WARDEN,  FOE_NAMES.warden,  true, "#B4DC8A"]
+  ];
+  const lx0 = Math.round((VIEW_W - (lineup.length - 1) * PITCH) / 2 - SPRITE_W / 2);
+  lineup.forEach(([rows, name, pal, label, flip, col], i) => {
+    const x = lx0 + i * PITCH;
+    drawPose(rows, name, x, LINE_Y, flip, pal, CELL_NINJA);
+    drawTextHD(label, x + Math.round((SPRITE_W - textWidthHD(label, 2)) / 2),
+               LINE_Y + 50, col, 2);
+  });
 
   drawButton(BTN_START, 3);
 
@@ -7122,7 +7437,8 @@ function renderWorld() {
   drawLowAmmoWarning();
 
   if (flash > 0) {
-    ctx.fillStyle = "rgba(" + flashCol + "," + Math.min(0.75, flash * 1.8).toFixed(3) + ")";
+    ctx.fillStyle = "rgba(" + flashCol + "," +
+                    Math.min(FLASH_MAX, flash * FLASH_GAIN).toFixed(3) + ")";
     ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   }
   // No HUD on the title screen: nothing it reports is meaningful yet.
@@ -7173,9 +7489,12 @@ function renderWorld() {
       drawTextHD(rows[i], (VIEW_W - textWidthHD(widest, 3)) / 2, 138 + i * 13, "#FFE2B0", 3);
     }
 
-    // The ninja stands at the gate, scarf still fluttering.
-    const endPose = (Math.floor(clock * 2.5) % 2) ? NINJA_IDLE_B : NINJA_IDLE;
-    drawPixels(endPose, (VIEW_W - SPRITE_W) / 2, 194, false, P_NINJA, CELL_NINJA);
+    // The ninja stands at the gate, scarf still fluttering. Through drawPose,
+    // for the same reason the title screen does.
+    const endBreathing = (Math.floor(clock * 2.5) % 2) !== 0;
+    drawPose(endBreathing ? NINJA_IDLE_B : NINJA_IDLE,
+             endBreathing ? "ninja/idleB" : "ninja/idle",
+             (VIEW_W - SPRITE_W) / 2, 194, false, P_NINJA, CELL_NINJA);
 
     const t3 = "PRESS R TO RESTART";
     drawTextHD(t3, (VIEW_W - textWidthHD(t3, 3)) / 2, VIEW_H - 68, "#C9D2E0", 3);

@@ -9,3 +9,8 @@ shot-*.png
 node_modules/
 .claude/settings.local.json
 .remember/
+
+# Source art downloaded by frontend/tools/pack_assets.py: 33MB of CC0 zips that
+# the script re-fetches on demand. The BUILT atlas (frontend/assets/sprites.png,
+# 49KB) is committed, because the game loads it at runtime.
+frontend/tools/.cache/

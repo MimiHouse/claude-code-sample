@@ -20,6 +20,7 @@ globalThis.__t = {
   P_NINJA, P_CHARGER, P_WARDEN, P_RUSHER,
   FONT, FONT_W, FONT_H, drawText, textWidth,
   FONT_HD, FONT_HD_W, FONT_HD_H, drawTextHD, textWidthHD, RENDER_SCALE,
+  NINJA_POSES, ENEMY_POSES, FOE_NAMES, ASSET_BASE,
   perfSample, FRAME_BUDGET, Q_FULL, Q_REDUCED, Q_MINIMAL,
   get quality() { return quality; }, set quality(v) { quality = v; },
   get perfMean() { return perfMean; }, get perfWorst() { return perfWorst; },
@@ -43,8 +44,10 @@ globalThis.__t = {
   COVER_H, SLASH_RANGE, SLASH_TIME, SLASH_HIT, SLASH_WIND,
   SLASH_W, SLASH_TOP, SLASH_BOT, CHG_MELEE, CHG_HIT_W,
   BUMP_VX, BUMP_VY, BUMP_GRACE, ARC_CY, ARC_RY, ARC_THICK,
+  ARC_LEAD, ARC_NEAR, ARC_MID, ARC_TAIL,
   BULLET_H, BULLET_W, BULLET_Y_OFF, BULLET_SPEED,
   MUSIC_MELODY, MUSIC_CHORDS, MUSIC_BPM, MUSIC_BAR, MUSIC_LEN,
+  MUSIC_BASS, MUSIC_KICK, MUSIC_SNARE, MUSIC_HAT,
   CELL_PROP,
   STRIDE_PX, FOE_STRIDE_PX, strideOf, WALK_CYCLE, walkFrame, isWalking, trackWalk,
   WALK_RATE_MIN, WALK_RATE_SMOOTH, IDLE_FPS,
@@ -77,7 +80,7 @@ globalThis.__t = {
   get punchX() { return punchX; }, get punchY() { return punchY; },
   addTrauma, addPunch, updateShake, shakeOffsetX, shakeOffsetY,
   TRAUMA_DECAY, SHAKE_PX, PUNCH_PX, IMPACT_TIME,
-  FREEZE_BLADE, FREEZE_SHURIKEN, drawSilhouette,
+  FREEZE_BLADE, FREEZE_SHURIKEN, drawSilhouette, FLASH_GAIN, FLASH_MAX,
   PERCH_SCAN, PERCH_WIND, PERCH_DIVE_VX, PERCH_DIVE_VY, PERCH_LAND,
   PERCH_HIT_W, PERCH_HIT_TOP, PERCH_HIT_BOT, enemyPoseOf, drawEnemyWeapon,
   get pickups() { return pickups; },
@@ -3018,11 +3021,39 @@ check("walking away from the wall animates again", t.isWalking(t.ninja),
 
 
 
-console.log("\n== the loop is music, not a sequence of beeps (req: calm BGM) ==");
-// 132 was driving, 84 was a lullaby, 108 is the walking pace between them.
-check("the tempo moves without driving",
-      t.MUSIC_BPM >= 96 && t.MUSIC_BPM <= 126,
+console.log("\n== the loop DRIVES, and is still music (req: fast, dynamic BGM) ==");
+/* This block asserted the opposite twice over, and both versions were right at
+   the time. First the loop was 132bpm with a note on all 32 subdivisions, which
+   is not a phrase; the fix was 108bpm, rests, and a brush instead of a hat, and
+   the tests were written to pin that down. The brief is now a fast action loop,
+   so the tempo ceiling had to go.
+
+   What did NOT change is the lesson underneath the first fix: the drive belongs
+   in the RHYTHM SECTION, not in a melody that fills every subdivision. So the
+   tempo floor is high, the bass and the kit are required to exist, and the
+   melody is still held to resting more than it plays. */
+check("the tempo drives",
+      t.MUSIC_BPM >= 138 && t.MUSIC_BPM <= 164,
       `${t.MUSIC_BPM}bpm, step ${(t.MUSIC_STEP * 1000).toFixed(0)}ms`);
+check("the bass moves WITHIN the bar rather than holding one note",
+      t.MUSIC_BASS.length === t.MUSIC_BAR &&
+      new Set(t.MUSIC_BASS).size >= 2,
+      `${t.MUSIC_BASS.length} steps, ${new Set(t.MUSIC_BASS).size} distinct offsets`);
+check("the bass riff is diatonic against EVERY chord in the loop", (() => {
+  // Only root, fifth and octave are safe against all of Am F G E Dm C: an
+  // offset of 10 is a nice riff over Am and an E-flat over F.
+  return t.MUSIC_BASS.every(o => o % 12 === 0 || o % 12 === 7);
+})(), `offsets ${[...new Set(t.MUSIC_BASS)].join(",")}`);
+check("the kit is a kit, not one tick repeating",
+      t.MUSIC_KICK.length >= 2 && t.MUSIC_SNARE.length >= 2 &&
+      t.MUSIC_HAT.length >= 2 &&
+      new Set([...t.MUSIC_KICK, ...t.MUSIC_SNARE]).size ===
+        t.MUSIC_KICK.length + t.MUSIC_SNARE.length,
+      `kick ${t.MUSIC_KICK} snare ${t.MUSIC_SNARE} hat ${t.MUSIC_HAT}`);
+check("there is a backbeat: the snare answers the kick off the beat",
+      t.MUSIC_SNARE.every(x => x % 2 === 0) &&
+      t.MUSIC_SNARE.every(x => t.MUSIC_KICK.indexOf(x) < 0),
+      `snare on ${t.MUSIC_SNARE.join(",")} of ${t.MUSIC_BAR}`);
 check("the loop is long enough not to announce itself",
       t.MUSIC_LEN * t.MUSIC_STEP >= 8,
       `${(t.MUSIC_LEN * t.MUSIC_STEP).toFixed(1)}s`);
@@ -3098,9 +3129,18 @@ check("the progression moves rather than droning",
         leading.length > 0 && vChord &&
         leading.every(f => [vChord.bass, ...vChord.notes].some(n => pc(n) === pc(f))),
         `${leading.length} leading tones`);
-  check("no melody note is a leading tone",
-        !t.MUSIC_MELODY.some(n => pc(n[1]) === 11),
-        "the tension belongs in the harmony; in the tune it reads as a wrong note");
+  /* The calm version banned the leading tone from the tune outright -- "in the
+     tune it reads as a wrong note" -- which is true when the tune is floating
+     over a pad and false when it is landing on the dominant with a kick under
+     it. What has to hold is that it only ever appears where the harmony is
+     already asking for it: in the dominant's own bar. Anywhere else it IS a
+     wrong note, and that is the claim worth keeping. */
+  check("a leading tone in the tune only lands in the dominant's own bar",
+        t.MUSIC_MELODY.filter(n => pc(n[1]) === 11).every(([at]) => {
+          const c = t.MUSIC_CHORDS[Math.floor(at / t.MUSIC_BAR) % t.MUSIC_CHORDS.length];
+          return pc(c.bass) === 7;
+        }),
+        `${t.MUSIC_MELODY.filter(n => pc(n[1]) === 11).length} in the tune`);
   check("every melody note is a chord tone or the seventh of its own bar", (() => {
     return t.MUSIC_MELODY.every(([at, f]) => {
       const c = t.MUSIC_CHORDS[Math.floor(at / t.MUSIC_BAR) % t.MUSIC_CHORDS.length];
@@ -3124,14 +3164,22 @@ t.pumpMusic();
   // fail it -- which is exactly what happened when it went from four bars to
   // eight and the fixed ceiling of 160 caught the new 172.
   const perStep = loop.osc / Math.max(1, loop.steps);
-  check("a full loop schedules both harmony and melody",
-        perStep >= 1.2 && perStep <= 4.0,
+  /* The ceiling went up with the rhythm section: a bass note on every eighth
+     plus a kick, a snare body and a pad is more oscillators per step than a pad
+     and a sparse tune were. It is still a ceiling, and it is what would catch
+     somebody adding a second melody voice without noticing the cost. */
+  check("a full loop schedules harmony, melody, bass and kit",
+        perStep >= 2.0 && perStep <= 8.0,
         `${perStep.toFixed(2)} oscillators per step over ${loop.steps} steps`);
-  // The old loop ticked every offbeat: one noise source per two steps. This one
-  // brushes the bar line: one per eight.
+  /* Noise sources per bar: one brush, one per snare, one per hat. The figure
+     that matters is that it is BOUNDED per bar -- the failure this replaces was
+     a tick on every offbeat with nothing else, which is the same count and a
+     completely different thing, so the shape of the kit is asserted above and
+     this only holds the budget. */
   const bars = t.MUSIC_LEN / t.MUSIC_BAR;
-  check("one soft brush per bar, not a hat on every offbeat",
-        loop.src <= bars + 2, `${loop.src} noise sources for ${bars} bars`);
+  const perBar = loop.src / bars;
+  check("the kit stays inside its noise budget per bar",
+        perBar >= 2 && perBar <= 8, `${perBar.toFixed(1)} noise sources per bar`);
   check("a loop is one loop, not several",
         loop.steps <= t.MUSIC_LEN + 2, `${loop.steps} of ${t.MUSIC_LEN} steps`);
 }
@@ -4335,6 +4383,23 @@ console.log("\n== the blade kill hits HARDER than the ranged kill ==");
         `${melee.score} vs ${ranged.score}`);
   check("hitstop stays short enough to read as impact rather than lag",
         melee.freeze <= 6 / 60, `${(melee.freeze * 1000).toFixed(0)}ms`);
+  /* The tint has to OUTLIVE its own hitstop. Turning the effects down broke
+     this once: the alpha used to be derived from the time remaining, so cutting
+     the strength also cut the duration, and the tint went out inside the freeze
+     it arrived with -- never visible as an effect of its own, just a slightly
+     different-coloured stop. Strength and duration are separate numbers now,
+     and this is the relation that has to hold between them. */
+  check("the screen tint outlives the hitstop it arrives with",
+        melee.flash > t.FREEZE_BLADE && ranged.flash > t.FREEZE_SHURIKEN,
+        `blade ${(melee.flash * 1000).toFixed(0)}ms tint vs ${(t.FREEZE_BLADE * 1000).toFixed(0)}ms freeze`);
+  check("the tint is a tint and not a whiteout", t.FLASH_MAX <= 0.45,
+        `peak alpha ${Math.min(t.FLASH_MAX, melee.flash * t.FLASH_GAIN).toFixed(3)}`);
+  /* The reduction pass kept the RATIOS and moved only the absolute amounts, so
+     these are the ceilings rather than the differences. */
+  check("the shake budget is restrained", t.SHAKE_PX + t.PUNCH_PX <= 9,
+        `${t.SHAKE_PX}px shake + ${t.PUNCH_PX}px shove`);
+  check("one kill does not spend the whole trauma budget", melee.trauma <= 0.45,
+        `${melee.trauma.toFixed(2)} of 1.0`);
   check("a slash that connected marks itself", melee.sawHitFlag);
   check("...and a shuriken never sets that flag", !ranged.sawHitFlag);
   // The arc stops drawing once it has connected. Tested on the flag rather than
@@ -4348,7 +4413,8 @@ console.log("\n== the blade kill hits HARDER than the ranged kill ==");
        about ten rects -- so a total-rect comparison could go either way and
        says nothing about whether the sweep stopped. The translucent trail
        colour belongs to the sweep alone. */
-    const TRAIL = "rgba(158,205,255,0.62)";
+    // Imported, not typed in. Retuning the ramp used to break this silently.
+    const TRAIL = t.ARC_TAIL;
     const sweepRects = () => {
       rects.length = 0;
       t.drawEntities();
@@ -4749,7 +4815,7 @@ console.log("\n== bumping, priority, and reach across an obstacle ==");
        the eye colour in every character palette, so every enemy on screen
        contributes a 1x1 white rect and the "far edge" came out at x=5795. The
        other two colours belong to the sweep alone. */
-    const ARC_COLS = new Set(["#CFE9FF", "rgba(158,205,255,0.62)"]);
+    const ARC_COLS = new Set([t.ARC_NEAR, t.ARC_MID, t.ARC_TAIL]);
     const arc = rects.filter(r => ARC_COLS.has(r.c));
     check("the arc is drawn as a dense band, not a few bars",
           arc.length > 30, `${arc.length} segments`);
@@ -5232,6 +5298,74 @@ console.log("\n== vaulters: they look over the wall, then come over it ==");
     tickThroughDeath();
     check("a death arms them again", !t.vaultsFired.some(Boolean),
           "the entrances belong to the attempt, not to the run");
+  }
+}
+
+console.log("\n== the shipped atlas (req: free-asset art upgrade) ==");
+/* The art moved out of the pixel arrays and into assets/sprites.png, which
+   means the readability rules moved out of reach of every assertion that checks
+   a PALETTE constant. lum(P_NINJA.B) is still 73 whatever the atlas contains --
+   so the suite would keep passing while the shipped player was invisible
+   against the night sky, which is precisely the failure the rule exists to
+   prevent.
+
+   pack_assets.py therefore measures the mean body luminance of what it actually
+   emitted and records it in the manifest, and these checks hold that figure to
+   the same rule the built-in palettes are held to. The generator cannot quietly
+   ship art that fails it.
+
+   The whole block is skipped when the folder is empty, because no assets is a
+   valid, supported and documented state -- the built-ins are the fallback. */
+{
+  const mpath = new URL("assets/manifest.json", import.meta.url);
+  let man = null;
+  try { man = JSON.parse(fs.readFileSync(mpath, "utf8")); } catch (err) { man = null; }
+  if (!man) {
+    console.log("  SKIP  no assets/manifest.json -- built-in art is the fallback");
+  } else {
+    check("the atlas declares a licence", /CC0|public domain/i.test(
+            (man.meta && man.meta.licence) || ""),
+          (man.meta && man.meta.licence) || "none");
+    // Every pose the game can ask for, so a pack cannot ship 90% of a character
+    // and leave one pose falling back to art that no longer matches the rest.
+    const want = [];
+    for (const p in t.NINJA_POSES) want.push("ninja/" + p);
+    for (const k in t.ENEMY_POSES) for (const p in t.ENEMY_POSES[k]) want.push(k + "/" + p);
+    const missing = want.filter(n => !man.frames[n]);
+    check("the atlas covers every pose the game draws", missing.length === 0,
+          missing.length ? "missing " + missing.join(" ") : `${want.length} poses`);
+    /* THE 2:1 CONTRACT. RENDER_SCALE is 2, so a frame declared at exactly half
+       its source size lands one source pixel per device pixel under
+       nearest-neighbour. Any other ratio resamples the art -- which is the
+       entire reason the art was replaced. */
+    const offRatio = Object.entries(man.frames).filter(([, f]) =>
+      f.dw * t.RENDER_SCALE !== f.w || f.dh * t.RENDER_SCALE !== f.h);
+    check("every frame is drawn at exactly 1 source pixel per device pixel",
+          offRatio.length === 0,
+          offRatio.length ? offRatio.slice(0, 3).map(([n]) => n).join(",")
+                          : `${Object.keys(man.frames).length} frames at 1:${t.RENDER_SCALE}`);
+
+    const chars = (man.meta && man.meta.characters) || {};
+    const pl = chars.ninja && chars.ninja.bodyLuma;
+    check("the atlas records the player's body luminance", typeof pl === "number",
+          String(pl));
+    // The rule the built-in palette satisfies at 73, applied to what ships.
+    check("the shipped player clears every sky band by 40 points",
+          typeof pl === "number" &&
+          Math.min(...SKY.map(b => Math.abs(lum(b) - pl))) >= 40,
+          `player ${pl}, nearest band ${Math.min(...SKY.map(b => Math.abs(lum(b) - pl))).toFixed(0)} away`);
+    /* And the player has to be separable from the enemies, which the first
+       build of the pipeline failed: equalisation puts the body in the middle of
+       whatever ramp it is handed, and including the gi's rim highlight in the
+       player's ramp dragged him to 101 against the rusher's 105. Blue and
+       purple at the same value is the classic confusion pair. */
+    const foes = Object.keys(chars).filter(k => k !== "ninja");
+    const worst = Math.min(...foes.map(k => Math.abs(chars[k].bodyLuma - pl)));
+    check("the player is separable from every foe by value alone", worst >= 30,
+          foes.map(k => `${k} ${chars[k].bodyLuma}`).join(", ") + ` vs player ${pl}`);
+    check("every foe kind has a display name",
+          foes.every(k => t.FOE_NAMES[k]),
+          foes.map(k => `${k}=${t.FOE_NAMES[k]}`).join(" "));
   }
 }
 

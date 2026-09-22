@@ -43,6 +43,7 @@ globalThis.__t = { ninja, cam, render, update, updateCamera, snapCamera, spawn,
   PERCH_WIND, PERCH_LAND, PERCH_SCAN, enemyPoseOf, solidAt, COLS, CAM_Y,
   ENEMY_WAKE, get hazards() { return hazards; },
   RENDER_SCALE, drawTextHD, textWidthHD, FONT_HD, FONT_HD_W, FONT_HD_H,
+  drawPose, ART, ENEMY_POSES,
   slash, get hitFreeze() { return hitFreeze; }, get trauma() { return trauma; },
   get punchX() { return punchX; }, shakeOffsetX, shakeOffsetY, killEnemy,
   get particles() { return particles; }, TILE, BODY_W };`;
@@ -370,14 +371,18 @@ shoot("shot-play.png", () => {
 
 // --- 3. the walk cycle, laid out as a strip -------------------------------
 {
-  const W = 350, H = 60, k = 3;
+  const W = 700, H = 72, k = 2;
   rects.length = 0;
   ctx.fillStyle = "#20242E"; ctx.fillRect(0, 0, W, H);
   // A ground line, so a pose that floats or loses its legs is obvious.
-  ctx.fillStyle = "#3A4152"; ctx.fillRect(0, 54, W, 1);
+  ctx.fillStyle = "#3A4152"; ctx.fillRect(0, 62, W, 1);
   const order = ["idle", "walkA", "walkB", "walkC", "walkD", "crouch", "draw", "slash", "jump"];
   order.forEach((p, i) => {
-    t.drawPixels(t.NINJA_POSES[p], 6 + i * 38, 6, false, t.P_NINJA, t.CELL_NINJA);
+    // drawPose, not drawPixels: with an atlas present these strips are the only
+    // place every replacement frame is looked at side by side, and drawPixels
+    // would keep showing the built-in arrays the atlas has replaced.
+    t.drawPose(t.NINJA_POSES[p], "ninja/" + p, 10 + i * 76, 10, false,
+               t.P_NINJA, t.CELL_NINJA);
   });
   writePNG("shot-cycle.png", scale(raster(W, H, rects), W, H, k), W * k, H * k);
   console.log(`wrote shot-cycle.png  (${order.join(" ")})`);
@@ -385,7 +390,7 @@ shoot("shot-play.png", () => {
 
 // --- 4. the three enemy bodies, each with its attack pose -----------------
 {
-  const W = 250, H = 62, k = 4;
+  const W = 420, H = 72, k = 3;
   rects.length = 0;
   ctx.fillStyle = "#20242E"; ctx.fillRect(0, 0, W, H);
   const line = [
@@ -394,7 +399,8 @@ shoot("shot-play.png", () => {
     ["warden", "base", t.P_WARDEN],   ["warden", "aim", t.P_WARDEN],
   ];
   line.forEach(([kind, pose, pal], i) => {
-    t.drawPixels(t.ENEMY_POSES[kind][pose], 4 + i * 38, 6, true, pal, t.CELL_NINJA);
+    t.drawPose(t.ENEMY_POSES[kind][pose], kind + "/" + pose,
+               8 + i * 68, 10, true, pal, t.CELL_NINJA);
   });
   writePNG("shot-enemy.png", scale(raster(W, H, rects), W, H, k), W * k, H * k);
   console.log("wrote shot-enemy.png  (charger/rusher/warden, base + attack)");
@@ -404,20 +410,20 @@ shoot("shot-play.png", () => {
 // The reported breakage was in the WALK frames, and the lineup above only ever
 // showed the standing and attack poses -- which is exactly why it shipped.
 {
-  const W = 560, H = 62, k = 3;
+  const W = 680, H = 72, k = 2;
   rects.length = 0;
   ctx.fillStyle = "#20242E"; ctx.fillRect(0, 0, W, H);
   const pals = { charger: t.P_CHARGER, rusher: t.P_RUSHER, warden: t.P_WARDEN };
   let i = 0;
   for (const kind of ["charger", "rusher", "warden"]) {
     for (const pose of ["base", "walkA", "walkB", "walkC", "walkD"]) {
-      t.drawPixels(t.ENEMY_POSES[kind][pose], 4 + i * 36, 6, true,
-                   pals[kind], t.CELL_NINJA);
+      t.drawPose(t.ENEMY_POSES[kind][pose], kind + "/" + pose,
+                 8 + i * 44, 10, true, pals[kind], t.CELL_NINJA);
       i++;
     }
     i += 0.6;
   }
-  ctx.fillStyle = "#4A5060"; ctx.fillRect(0, 54, W, 1);
+  ctx.fillStyle = "#4A5060"; ctx.fillRect(0, 62, W, 1);
   writePNG("shot-foewalk.png", scale(raster(W, H, rects), W, H, k), W * k, H * k);
   console.log("wrote shot-foewalk.png (three kinds x base + four walk phases)");
 }
