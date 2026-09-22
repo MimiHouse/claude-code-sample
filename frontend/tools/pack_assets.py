@@ -43,6 +43,13 @@ WHY RECOLOUR AT ALL
     black with a rim light. Equalising sends the biggest bucket to the middle of
     the ramp, which is where a base colour belongs.
 
+    FIVE steps per ramp, not three. Three held the means where the value plan
+    wanted them and gave every character three flat colours, which on a 39px
+    figure is a silhouette with a stripe in it. Five spans luminance 30 to 241
+    and still lands each mean where it belongs, because equalisation uses the
+    whole ramp evenly whatever its length -- so contrast is nearly free, and
+    only the ramp's SPAN has to be chosen with the mean in mind.
+
     Colours are QUANTISED to the ramp rather than interpolated along it. The
     rest of the game is flat-shaded, and a smooth gradient next to it reads as a
     photograph someone pasted in.
@@ -68,7 +75,46 @@ BASE = "https://www.gameart2d.com/uploads/3/0/9/1/30917885/"
 PACKS = {
     "ninjaadventurenew": BASE + "ninjaadventurenew.zip",
     "ninjagirlnew":      BASE + "ninjagirlnew.zip",
-    "freeknight":        BASE + "freeknight.zip",
+    # 46MB, and worth it: one archive holds three separate side-view bodies --
+    # Ninja, SamuraiHeavy and SamuraiLight -- which is what finally retired the
+    # European knight that used to stand in for the heavy.
+    "fh-samurai":        "https://opengameart.org/sites/default/files/Samurai_1.zip",
+}
+
+# Per pack: the licence that travels with it, and whether that licence obliges
+# the GAME to carry a credit. CC-BY does; CC0 does not. CREDITS_REQUIRED is read
+# by the manifest and asserted against the in-game credits screen, so a CC-BY
+# pack cannot be added without the credit appearing where a player can see it.
+# THE MUSIC.
+# The built-in loop is synthesised -- 148bpm, an eighth-note bass ostinato and a
+# kit -- and it stays as the fallback, because it is what works from file:// with
+# nothing downloaded. This is the track that plays once the assets folder is
+# populated: a genuine C64 chiptune, which is the timbre the synth was reaching
+# for and cannot actually reach.
+#
+# Supplying `music` switches the step scheduler off ENTIRELY rather than playing
+# over it. That contract is in assets/README.md and predates this.
+MUSIC = dict(
+    file="music.ogg",
+    url="https://opengameart.org/sites/default/files/c64_uptempo_chiptune.ogg",
+    title="C64 Uptempo Chiptune",
+    author="Skrjablin",
+    licence="CC0 / public domain",
+    page="https://opengameart.org/content/"
+         "6-genuinely-c64-soundtracks-released-as-public-domain-may-2017",
+    # The author: "Released as public domain, but I still appreciate if you want
+    # to credit me, 'Skrjablin'." CC0 obliges nothing; crediting costs nothing.
+    credit=False,
+)
+
+LICENCES = {
+    "ninjaadventurenew": dict(name="CC0 / public domain", author="gameart2d.com",
+                              url="https://www.gameart2d.com/license.html", credit=False),
+    "ninjagirlnew":      dict(name="CC0 / public domain", author="gameart2d.com",
+                              url="https://www.gameart2d.com/license.html", credit=False),
+    "fh-samurai":        dict(name="CC-BY 3.0", author="Ragewortt",
+                              url="https://opengameart.org/content/fantasy-heroes-samurai-sprite-sheet",
+                              credit=True),
 }
 
 # The body height, in destination pixels, that a character's REFERENCE pose is
@@ -343,14 +389,20 @@ def body_luma(frame, outline, white):
 # Walk phases are chosen by MEASUREMENT, not by eye: a contact frame is the
 # widest foot spread in the cycle and a passing frame the narrowest. The engine
 # drives A->B->C->D by distance travelled, so A and C must be the two contacts.
-def seq(pack, stem, idx, pad=3):
-    if pack == "freeknight":
-        return "%s (%d).png" % (stem, idx)
-    return "%s%s.png" % (stem, str(idx).zfill(pad))
+def seq(ch, stem, idx):
+    """Source file for one frame. Every pack names its frames differently, so the
+    pattern travels with the character rather than being guessed from the pack:
+      gameart2d   png/Idle__000.png        -> "{stem}{idx:03}.png"
+      FH samurai  SamuraiHeavy/Walk/3.png  -> "{stem}/{idx}.png"
+    """
+    return os.path.join(CACHE, ch["pack"], ch["dir"],
+                        ch["fmt"].replace("{stem}", stem).replace("{idx}", str(idx))
+                                 .replace("{idx3}", str(idx).zfill(3)))
 
 
 CAST = [
-    dict(kind="ninja", pack="ninjaadventurenew", ref=("Idle__", 0), body_px=96,
+    dict(kind="ninja", pack="ninjaadventurenew", dir="png",
+         fmt="{stem}{idx3}.png", ref=("Idle__", 0), body_px=96,
          # RAMP LENGTH SETS THE MEAN, WHICH IS THE READABILITY BUDGET.
          # Equalisation puts the bulk of the body in the middle of whatever
          # ramp it is given, so the ramp's own span decides where the character
@@ -363,7 +415,11 @@ CAST = [
          # So the player's ramp stops at the lit edge. Mean 73 -- exactly the
          # figure the sky bands are pinned 40 points below -- and every enemy
          # ramp starts above it. 
-         body=ramp_of("#1B2A50", "#2E4A8C", "#4E72C4"),
+         # The top step is the gi's LIT edge, not its rim highlight. #8FAEEE
+         # (luminance 172) pulled the player's mean to 94 against the IRONCLAD's
+         # 119 -- a 25-point gap where the suite asks for 30. #6E92D8 keeps the
+         # five steps and the contrast and puts the mean back on 80.
+         body=ramp_of("#141E3A", "#1B2A50", "#2E4A8C", "#4E72C4", "#6E92D8"),
          accent=ramp_of("#A8302A", "#E8563F", "#FF9377"),
          outline="#0E0B12", white="#FFFFFF",
          poses={
@@ -385,10 +441,11 @@ CAST = [
              "crouch":      ("Slide__", 2),
              "crouchThrow": ("Jump_Throw__", 5),
          }),
-    dict(kind="rusher", pack="ninjagirlnew", ref=("Idle__", 0), body_px=92,
+    dict(kind="rusher", pack="ninjagirlnew", dir="png",
+         fmt="{stem}{idx3}.png", ref=("Idle__", 0), body_px=92,
          # Her body is dark maroon; only the bright red is an accent.
          accent_sat=0.86,
-         body=ramp_of("#7A3FA0", "#B57FE8", "#D2ABF5"),      # mean ~139
+         body=ramp_of("#3A2050", "#7A3FA0", "#B57FE8", "#D2ABF5", "#EDDCFA"),
          accent=ramp_of("#0F3A46", "#1F7183", "#46B8C8"),
          outline="#17121C", white="#FFFFFF",
          poses={
@@ -400,41 +457,106 @@ CAST = [
              "wallOver": ("Climb_", 6),
              "coil":     ("Slide__", 2),
          }),
-    dict(kind="charger", pack="freeknight", ref=("Idle", 1), body_px=98,
-         body=ramp_of("#8A5228", "#D69A62", "#EFC08A"),      # mean ~150
+    # IRONCLAD: the heavy, and the reason a fourth pack was worth 46MB.
+    # It used to be gameart2d's Knight -- plumed helm, round shield,
+    # unmistakably European -- which was the right SHAPE for the heavy and the
+    # wrong costume for a game whose other three are shinobi. This is an
+    # armoured samurai with a two-handed blade: the widest silhouette in the
+    # cast (content 210px wide against the light samurai's 167) and in the
+    # right tradition.
+    #
+    # The trade is real and it is in the walk. The gameart2d cycles are ten
+    # frames covering two full steps, foot spread swinging 0.14 to 0.76. These
+    # are ten files holding FIVE unique frames ping-ponged, so they are a single
+    # low-amplitude step and there is no second contact to find. The four phases
+    # below are the four most distinct frames available, taken from Run rather
+    # than Walk because Run has the wider spread, and they read as a gait rather
+    # than as a true two-step cycle. Style won that argument; the PLAYER keeps a
+    # real four-phase cycle because the player keeps the gameart2d body.
+    dict(kind="charger", pack="fh-samurai", dir="SamuraiHeavy",
+         fmt="{stem}/{idx}.png", ref=("Stand", 0), body_px=98,
+         # ACCENT ROUTING OFF. Both samurai have a saturated warm BODY -- the
+         # heavy's armour is #802A22 at hue 5 and saturation 0.58, and the
+         # light's largest single colour is skin at #E6AB6C, hue 31, 18.6% of
+         # the figure. Any warm-accent test wide enough to catch a sash catches
+         # the whole character, which is what dropped the IRONCLAD to luminance
+         # 88 against the player's 80 on the first build of this pack.
+         #
+         # Turned off, plain luminance does the right thing by itself: the skin
+         # is the brightest thing on the figure and lands at the top of the
+         # ramp, the armour is mid, the underlayer is low. The ninja packs still
+         # need the routing, because on them the warm colour really is a scarf.
+         accent_sat=0.95,
+
+         # The heavy reads darker, which is both a design cue and the only
+         # room left on the value axis. With the player pinned at 80 by the sky
+         # rule and the warden wanting the top of the range, three enemies have
+         # to fit above 80 without crowding: the first build of this pack put
+         # the IRONCLAD at 155 and the GLAIVE at 160, five apart, which is not
+         # a difference anyone can see mid-fight. 115 / 139 / 177 now. 
+         body=ramp_of("#3E2412", "#6B3E1E", "#A5703C", "#D69A62", "#F0CFA8"),
          accent=ramp_of("#5E1410", "#9E2418", "#CE4A32"),
          outline="#2A1710", white="#FFFFFF",
          poses={
-             "base":  ("Idle", 1),
-             "walkA": ("Walk", 4), "walkB": ("Walk", 7),
-             "walkC": ("Walk", 9), "walkD": ("Walk", 1),
-             "attack": ("Attack", 6),
-             "lunge":  ("JumpAttack", 5),
-             "coil":   ("Jump", 1),
+             "base":  ("Stand", 0),
+             "walkA": ("Run", 2), "walkB": ("Run", 0),
+             "walkC": ("Run", 4), "walkD": ("Run", 1),
+             "attack": ("Attack2H", 5),
+             "lunge":  ("Attack2H", 2),
+             "coil":   ("Alert2H", 0),
          }),
-    # The warden shares the player's body, which is the one compromise in this
-    # set -- three packs, four characters. It is separated three ways instead:
-    # olive against the player's blue (luminance 177 against 73), a shorter and
-    # wider build (body_px 88, so a lower centre of gravity, which is its design
-    # note anyway), and every enemy is drawn MIRRORED while the player faces
-    # right. A fourth CC0 pack would retire the compromise.
-    dict(kind="warden", pack="ninjaadventurenew", ref=("Idle__", 2), body_px=88,
-         body=ramp_of("#4A6B32", "#8FC45E", "#B4DC8A"),      # mean ~161
+    # GLAIVE: the thrower. It used to share the PLAYER's body -- three packs for
+    # four characters -- separated only by colour, height and the fact that
+    # enemies are mirrored. Same body as the hero is the one thing a player
+    # should never have to squint at, so it is its own figure now: the light
+    # samurai, slimmer than the IRONCLAD and taller than it looks, which is the
+    # low-centre-of-gravity read its design note always wanted.
+    #
+    # Its `aim` and `sweep` are stances rather than attack frames, and that is
+    # fine here: drawEnemyWeapon() draws the levelled polearm, the sight line and
+    # the low arc in CODE, over whatever pose is underneath. The pose only has to
+    # look committed.
+    dict(kind="warden", pack="fh-samurai", dir="SamuraiLight",
+         fmt="{stem}/{idx}.png", ref=("Stand", 0), body_px=88,
+         accent_sat=0.95,     # see the IRONCLAD note above
+
+         body=ramp_of("#31491F", "#5E8A3C", "#8FC45E", "#C4E49A", "#E8F6D4"),
          accent=ramp_of("#3A3226", "#6B5E45", "#9A8A68"),
          outline="#16220F", white="#FFFFFF",
          poses={
-             "base":  ("Idle__", 2),
-             "walkA": ("Run__", 3), "walkB": ("Run__", 6),
-             "walkC": ("Run__", 8), "walkD": ("Run__", 0),
-             "aim":   ("Throw__", 2),
-             "sweep": ("Attack__", 7),
-             "duck":  ("Slide__", 4),
-             "coil":  ("Slide__", 2),
+             "base":  ("Stand", 0),
+             "walkA": ("Run", 2), "walkB": ("Run", 0),
+             "walkC": ("Run", 4), "walkD": ("Run", 1),
+             "aim":   ("Alert1H", 0),
+             "sweep": ("Attack1H", 5),
+             "duck":  ("Alert1H", 3),
+             "coil":  ("Attack1H", 1),
          }),
 ]
 
 
 # --------------------------------------------------------------- fetch
+def fetch_music():
+    """Straight download, no archive. Written into assets/ rather than the cache
+    because it IS the shipped artefact -- there is nothing to repack."""
+    os.makedirs(ASSETS, exist_ok=True)
+    dest = os.path.join(ASSETS, MUSIC["file"])
+    if os.path.exists(dest):
+        return dest
+    sys.stderr.write("fetching music ...\n")
+    req = urllib.request.Request(MUSIC["url"],
+                                 headers={"User-Agent": "clawd-jump/pack"})
+    with urllib.request.urlopen(req, timeout=300) as r, open(dest, "wb") as f:
+        f.write(r.read())
+    # A truncated download is worse than none: the loader would fail to decode
+    # it and fall back silently, which looks like the manifest being ignored.
+    head = open(dest, "rb").read(4)
+    if head != b"OggS":
+        os.remove(dest)
+        raise SystemExit("music download is not an Ogg stream")
+    return dest
+
+
 def fetch():
     os.makedirs(CACHE, exist_ok=True)
     for name, url in PACKS.items():
@@ -447,32 +569,47 @@ def fetch():
             req = urllib.request.Request(url, headers={"User-Agent": "clawd-jump/pack"})
             with urllib.request.urlopen(req, timeout=180) as r, open(zp, "wb") as f:
                 f.write(r.read())
-        with zipfile.ZipFile(zp) as z:
-            z.extractall(out)
+        unpack(zp, out)
         sys.stderr.write("  unpacked %s\n" % name)
 
 
-def srcdir(pack):
-    for root, dirs, files in os.walk(os.path.join(CACHE, pack)):
-        if any(f.lower().endswith(".png") for f in files) and os.path.basename(root) == "png":
-            return root
-    raise SystemExit("no png/ directory in %s" % pack)
+def unpack(zp, out):
+    """Extract a downloaded zip, refusing any member that would land outside the
+    destination.
+
+    zipfile.extractall() honours whatever paths are inside the archive, so an
+    entry named `../../../.ssh/authorized_keys` writes there. The archives this
+    fetches are fine today and come from a URL in this file, but "the remote
+    file is currently benign" is not a property the script can check, and it
+    re-downloads on demand -- so the check belongs here rather than in a note.
+    Python 3.12's `filter="data"` does the same thing; this works on 3.9, which
+    is what the box has."""
+    root = os.path.realpath(out)
+    with zipfile.ZipFile(zp) as z:
+        for m in z.infolist():
+            dest = os.path.realpath(os.path.join(out, m.filename))
+            if dest != root and not dest.startswith(root + os.sep):
+                raise SystemExit("refusing zip member outside the destination: %s"
+                                 % m.filename)
+        z.extractall(out)
 
 
 # --------------------------------------------------------------- build
 def build():
     fetch()
+    fetch_music()
     os.makedirs(ASSETS, exist_ok=True)
     frames, meta = {}, {}
     for ch in CAST:
-        d = srcdir(ch["pack"])
-        refp = os.path.join(d, seq(ch["pack"], *ch["ref"]))
+        refp = seq(ch, *ch["ref"])
+        if not os.path.exists(refp):
+            raise SystemExit("missing reference frame %s" % refp)
         scale = body_scale(refp, ch["body_px"])
         outline = ramp_of(ch["outline"])[0]
         white = ramp_of(ch["white"])[0]
         paths = {}
         for pose, (stem, idx) in sorted(ch["poses"].items()):
-            p = os.path.join(d, seq(ch["pack"], stem, idx))
+            p = seq(ch, stem, idx)
             if not os.path.exists(p):
                 raise SystemExit("missing source frame %s" % p)
             paths[pose] = p
@@ -486,8 +623,12 @@ def build():
                           ch.get("accent_sat", 0.34))
             frames["%s/%s" % (ch["kind"], pose)] = rc
             lumas.append(body_luma(rc, outline, white))
+        lic = LICENCES[ch["pack"]]
         meta[ch["kind"]] = {
             "pack": ch["pack"],
+            "licence": lic["name"],
+            "author": lic["author"],
+            "creditRequired": lic["credit"],
             "bodyLuma": round(sum(lumas) / len(lumas), 1),
             "poses": len(placed),
         }
@@ -534,12 +675,22 @@ def build():
 
     manifest = {
         "atlas": "sprites.png",
+        "audio": {"music": MUSIC["file"]},
         "frames": table,
         "meta": {
             "generator": "frontend/tools/pack_assets.py",
-            "licence": "CC0 / public domain (gameart2d.com freebies)",
+            "licence": "mixed: CC0 and CC-BY 3.0; see characters[].licence",
             "sources": sorted({c["pack"] for c in CAST}),
+            # The packs whose licence obliges the GAME to carry a credit. The
+            # suite reads this and fails if a name here is missing from the
+            # in-game credits screen, so art cannot be added on a CC-BY licence
+            # without the attribution arriving with it. 
+            "creditRequired": sorted({LICENCES[c["pack"]]["author"] for c in CAST
+                                      if LICENCES[c["pack"]]["credit"]}),
+            "packLicences": {p: LICENCES[p] for p in sorted({c["pack"] for c in CAST})},
             "bodyPx": BODY_PX,
+            "music": {k: MUSIC[k] for k in
+                      ("file", "title", "author", "licence", "page")},
             "characters": meta,
         },
     }
@@ -550,7 +701,7 @@ def build():
 
 
 def clean():
-    for f in ("sprites.png", "manifest.json"):
+    for f in ("sprites.png", "manifest.json", MUSIC["file"]):
         p = os.path.join(ASSETS, f)
         if os.path.exists(p):
             os.remove(p); sys.stderr.write("removed assets/%s\n" % f)

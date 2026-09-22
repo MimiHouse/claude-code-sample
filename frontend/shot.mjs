@@ -44,6 +44,7 @@ globalThis.__t = { ninja, cam, render, update, updateCamera, snapCamera, spawn,
   ENEMY_WAKE, get hazards() { return hazards; },
   RENDER_SCALE, drawTextHD, textWidthHD, FONT_HD, FONT_HD_W, FONT_HD_H,
   drawPose, ART, ENEMY_POSES,
+  CREDITS, drawCredits,
   slash, get hitFreeze() { return hitFreeze; }, get trauma() { return trauma; },
   get punchX() { return punchX; }, shakeOffsetX, shakeOffsetY, killEnemy,
   get particles() { return particles; }, TILE, BODY_W };`;
@@ -654,4 +655,13 @@ shoot("shot-impact.png", () => {
               ` trauma=${t.trauma.toFixed(2)}` +
               ` shove=(${t.shakeOffsetX()},${t.shakeOffsetY()})px` +
               ` debris=${t.particles.length}`);
+});
+
+// --- 14. the credits screen ----------------------------------------------
+// It exists because two of the four character packs are CC-BY, which asks for
+// attribution IN THE WORK. A licence obligation that only a still can confirm
+// needs a still.
+shoot("shot-credits.png", () => {
+  t.restart(); t.cam.y = t.CAM_Y; t.mode = "credits"; t.clock = 1.0;
+  console.log(`   ${t.CREDITS.length} credit lines`);
 });

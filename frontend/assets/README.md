@@ -199,25 +199,52 @@ Reliable CC0 sources for this art style and scale:
 
 | File | Source | Licence | Added |
 | --- | --- | --- | --- |
-| `sprites.png` | built by `tools/pack_assets.py` from the three packs below | CC0 / public domain | 2026-09-22 |
+| `sprites.png` | built by `tools/pack_assets.py` from the packs below | CC0 **and CC-BY 3.0** — see below | 2026-09-22 |
 | `manifest.json` | built by `tools/pack_assets.py` | n/a (generated) | 2026-09-22 |
+| `music.ogg` | [C64 Uptempo Chiptune](https://opengameart.org/content/6-genuinely-c64-soundtracks-released-as-public-domain-may-2017) by Skrjablin | CC0 / public domain | 2026-09-22 |
 
-The atlas is a derivative work of three packs, all from the **Freebies** section
-of gameart2d.com, whose [licence page](https://www.gameart2d.com/license.html)
-states: *"Assets in the Freebies section are licensed under Creative Commons
-Zero (CC0) / Public Domain"*, usable in *"any commercial or non-commercial
-projects"*, and *"You don't need to credit me or link the site, but you're
-welcome to if you like."* Credit is given anyway, because it costs nothing:
+### Character packs
 
-| Pack | Used for | Licence |
+| Pack | Used for | Licence | Author |
+| --- | --- | --- | --- |
+| [Ninja Adventure](https://www.gameart2d.com/ninja-adventure---free-sprites.html) | the player | CC0 | gameart2d.com |
+| [Ninja Girl](https://www.gameart2d.com/ninja-girl---free-sprites.html) | the SHADE | CC0 | gameart2d.com |
+| [Fantasy Heroes: Samurai](https://opengameart.org/content/fantasy-heroes-samurai-sprite-sheet) — `SamuraiHeavy` | the IRONCLAD | **CC-BY 3.0** | Ragewortt |
+| [Fantasy Heroes: Samurai](https://opengameart.org/content/fantasy-heroes-samurai-sprite-sheet) — `SamuraiLight` | the GLAIVE | **CC-BY 3.0** | Ragewortt |
+
+gameart2d's [licence page](https://www.gameart2d.com/license.html) states:
+*"Assets in the Freebies section are licensed under Creative Commons Zero (CC0)
+/ Public Domain"*, usable in *"any commercial or non-commercial projects"*, and
+*"You don't need to credit me or link the site, but you're welcome to if you
+like."*
+
+**The CC-BY packs are why there is a credits screen.** This file has said since
+before any of this art arrived that CC-BY *"is a commitment — the credit has to
+appear in the game, not just in this file. There is no credits screen yet; add
+one before adding CC-BY assets."* There is one now: `K` on the title screen, or
+the CREDITS button. `manifest.json` records which authors are owed a credit and
+the suite fails if one of them is missing from that screen, so this cannot
+quietly rot.
+
+Ragewortt's own note is *"No special instructions. Credit is not mandatory"* —
+but the licence is CC-BY, and an author's note does not change a licence. The
+credit is given.
+
+The source archives (79MB) are **not** committed — `pack_assets.py` fetches them
+on demand into `tools/.cache/`, which is gitignored. The built atlas is 60KB and
+the music is 1.9MB; both are committed, because the game loads them at runtime.
+
+### Rejected candidates
+
+Recorded so nobody spends the afternoon re-evaluating them:
+
+| Candidate | Licence | Why not |
 | --- | --- | --- |
-| [Ninja Adventure](https://www.gameart2d.com/ninja-adventure---free-sprites.html) | the player, and the GLAIVE | CC0 |
-| [Ninja Girl](https://www.gameart2d.com/ninja-girl---free-sprites.html) | the SHADE | CC0 |
-| [The Knight](https://www.gameart2d.com/the-knight-free-sprites.html) | the IRONCLAD | CC0 |
-
-The source zips (33MB) are **not** committed — `pack_assets.py` fetches them on
-demand into `tools/.cache/`, which is gitignored. The built atlas is 49KB and
-is committed, because the game loads it at runtime.
+| [OGA `ninja-black-32x32`](https://opengameart.org/content/ninja-animated-0) | CC0 | Good art, wrong projection: a four-direction RPG character drawn front-on. A side-scroller needs a profile and only one of its seven columns is one. |
+| [OGA Samurai \[Animated\]](https://opengameart.org/content/samurai-animated) | CC0 | 40×29px native. Scaled to a 96px body it is 3× upscaled and visibly coarser than the ~450px packs beside it. |
+| [gameart2d The Knight](https://www.gameart2d.com/the-knight-free-sprites.html) | CC0 | Shipped as the IRONCLAD first. Excellent ten-frame two-step walk, and a plumed helm with a round shield in a cast of shinobi. Retired on style. |
+| [CraftPix free ninja / shinobi](https://craftpix.net/freebies/free-ninja-sprite-sheets-pixel-art/) | CraftPix freebie | Commercial use is granted, but the licence restricts redistributing the art as reusable source files — and a repacked atlas in a public repository is exactly that. |
+| [OGA Fantasy Heroes: Samurai](https://opengameart.org/content/fantasy-heroes-samurai-sprite-sheet) walk cycles | CC-BY 3.0 | Adopted for the bodies, **not** for the gait: ten files hold five unique frames ping-ponged, so it is one low-amplitude step. The player keeps a gameart2d body for exactly this reason. |
 
 **Rejected on inspection, not on licence:** OpenGameArt's `ninja-black-32x32.png`
 (CC0, Morgan McGuire / DezrasDragons) is good art and useless here — it is a

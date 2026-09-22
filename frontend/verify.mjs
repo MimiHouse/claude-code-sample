@@ -44,6 +44,7 @@ globalThis.__t = {
   COVER_H, SLASH_RANGE, SLASH_TIME, SLASH_HIT, SLASH_WIND,
   SLASH_W, SLASH_TOP, SLASH_BOT, CHG_MELEE, CHG_HIT_W,
   BUMP_VX, BUMP_VY, BUMP_GRACE, ARC_CY, ARC_RY, ARC_THICK,
+  CREDITS, BTN_CREDITS, BTN_BACK, drawCredits,
   ARC_LEAD, ARC_NEAR, ARC_MID, ARC_TAIL,
   BULLET_H, BULLET_W, BULLET_Y_OFF, BULLET_SPEED,
   MUSIC_MELODY, MUSIC_CHORDS, MUSIC_BPM, MUSIC_BAR, MUSIC_LEN,
@@ -2294,8 +2295,56 @@ check("restart() itself still lands in play, so R and the menus work",
 
 t.toTitle();
 check("toTitle returns to the opening screen", t.mode === "title");
-check("the title screen offers exactly one button",
-      t.buttonsFor("title").length === 1 && t.buttonsFor("title")[0] === t.BTN_START);
+/* Two buttons now, and START is still the FIRST one -- which is the part worth
+   pinning. The keyboard mirrors whatever is first, and a credits screen that
+   answered the Start key would be the worst possible regression here. */
+check("the title screen leads with START", t.buttonsFor("title")[0] === t.BTN_START);
+check("...and offers credits beside it",
+      t.buttonsFor("title").length === 2 &&
+      t.buttonsFor("title")[1] === t.BTN_CREDITS);
+
+/* THE CC-BY OBLIGATION, checked rather than trusted.
+   Two of the four character packs are CC-BY 3.0, which asks for attribution in
+   the work. assets/README.md required a credits screen before any CC-BY asset
+   could be added; this is what stops that from being a promise. The manifest
+   lists the authors whose licence obliges a credit, and every one of them has
+   to appear on the screen a player can actually reach. */
+{
+  const credited = t.CREDITS.map(c => c[1].toUpperCase()).join(" ");
+  let cman = null;
+  try {
+    cman = JSON.parse(fs.readFileSync(new URL("assets/manifest.json", import.meta.url), "utf8"));
+  } catch (err) { cman = null; }
+  const owed = (cman && cman.meta && cman.meta.creditRequired) || [];
+  check("the credits screen is reachable from the title",
+        t.buttonsFor("title").indexOf(t.BTN_CREDITS) >= 0 &&
+        t.buttonsFor("credits").length === 1);
+  if (!owed.length) {
+    console.log("  SKIP  no CC-BY assets present, so nothing is owed a credit");
+  } else {
+    const missing = owed.filter(a => credited.indexOf(a.toUpperCase()) < 0);
+    check("every author the licence obliges us to credit is on that screen",
+          missing.length === 0,
+          missing.length ? "missing " + missing.join(", ") : owed.join(", "));
+  }
+  check("the credits name the licences, not just the authors",
+        /CC0/.test(credited) && /CC BY|CC-BY/.test(credited));
+  /* Music is an asset too, and it is the one most likely to be swapped without
+     anyone thinking about the licence -- a track is a single file drop. CC0
+     obliges no credit, so this is not a licence check; it is a check that the
+     screen does not claim the repository wrote music it did not write. */
+  const mus = cman && cman.meta && cman.meta.music;
+  if (mus) {
+    check("the shipped music is credited to its author",
+          credited.indexOf(String(mus.author).toUpperCase()) >= 0,
+          `${mus.title} by ${mus.author} (${mus.licence})`);
+    check("the manifest actually routes it to the music cue",
+          cman.audio && cman.audio.music === mus.file,
+          JSON.stringify(cman.audio));
+  } else {
+    console.log("  SKIP  no music asset; the synthesised loop is what plays");
+  }
+}
 // Nothing may simulate on the title screen...
 const titleX = t.ninja.x;
 tick(30);

@@ -2571,6 +2571,41 @@ const WARDEN_DUCK = [
    name. */
 const FOE_NAMES = { charger: "IRONCLAD", rusher: "SHADE", warden: "GLAIVE" };
 
+/* CREDITS, and why this screen exists at all.
+   The character art comes from four free sprite packs. Two are CC0, which asks
+   for nothing. Two -- the heavy and light samurai -- are CC-BY 3.0, and CC-BY
+   asks for attribution IN THE WORK, not in a README nobody playing will open.
+   frontend/assets/README.md has said so since before any of this art arrived:
+   "CC-BY is fine but is a commitment -- the credit has to appear in the game,
+   not just in this file. There is no credits screen yet; add one before adding
+   CC-BY assets."
+
+   So this is the screen that had to exist before the samurai could. It is
+   hard-coded rather than read from the manifest, because it has to be correct
+   with the assets folder empty as well as full -- and the suite checks it
+   against the manifest's own creditRequired list, so a pack cannot be added on
+   a CC-BY licence without its author appearing here.
+
+   [indent, text, colour]. */
+const CREDITS = [
+  [0, "CHARACTER ART", "#FFE45E"],
+  [1, "SAMURAI HEAVY / SAMURAI LIGHT", "#C9D2E0"],
+  [2, "RAGEWORTT - CC BY 3.0", "#9FD0FF"],
+  [2, "OPENGAMEART.ORG", "#8E9AAD"],
+  [1, "NINJA ADVENTURE / NINJA GIRL", "#C9D2E0"],
+  [2, "GAMEART2D.COM - CC0", "#9FD0FF"],
+  [0, "MUSIC", "#FFE45E"],
+  [1, "C64 UPTEMPO CHIPTUNE", "#C9D2E0"],
+  [2, "SKRJABLIN - CC0", "#9FD0FF"],
+  [2, "OPENGAMEART.ORG", "#8E9AAD"],
+  [0, "EVERYTHING ELSE", "#FFE45E"],
+  [1, "CODE, ART PIPELINE, BACKGROUND,", "#C9D2E0"],
+  [1, "EFFECTS, SOUND, FONT, SYNTH BGM", "#C9D2E0"],
+  [2, "THIS REPOSITORY", "#8E9AAD"],
+  [0, "FULL LICENCE INVENTORY", "#FFE45E"],
+  [1, "FRONTEND/ASSETS/README.MD", "#8E9AAD"]
+];
+
 const ENEMY_POSES = {
   charger: {
     base: CHARGER_BASE, walkA: CHARGER_WALKA, walkB: CHARGER_WALKB,
@@ -4045,7 +4080,7 @@ const keys = new Set();
 // without it the browser scrolls the page out from under the canvas.
 const HANDLED = new Set([
   "ArrowLeft", "ArrowRight", "ArrowDown", "KeyZ", "KeyX", "KeyC", "KeyR", "KeyD",
-  "Space", "Enter", "KeyM",
+  "Space", "Enter", "KeyM", "KeyK",
   // Dash is on Shift and mirrored on A: Shift is where the hands already are,
   // and A is there for keyboards that swallow Shift under sticky-keys.
   "ShiftLeft", "ShiftRight", "KeyA"
@@ -4061,11 +4096,16 @@ const BTN_START   = { x: 246, y: 196, w: 148, h: 32, label: "START" };
 const BTN_RESUME  = { x: 246, y: 152, w: 148, h: 28, label: "RESUME" };
 const BTN_RESTART = { x: 246, y: 192, w: 148, h: 28, label: "RESTART" };
 const BTN_TITLE   = { x: 246, y: 214, w: 148, h: 28, label: "TITLE" };
+// Beside START rather than under it: under it landed on the control legend,
+// where it was clickable and invisible.
+const BTN_CREDITS = { x: 404, y: 200, w: 104, h: 24, label: "CREDITS" };
+const BTN_BACK    = { x: 246, y: VIEW_H - 46, w: 148, h: 26, label: "BACK" };
 
 let hover = null;                 // button under the pointer, for the highlight
 
 function buttonsFor(m) {
-  if (m === "title") return [BTN_START];
+  if (m === "title") return [BTN_START, BTN_CREDITS];
+  if (m === "credits") return [BTN_BACK];
   if (m === "paused") return [BTN_RESUME, BTN_RESTART];
   if (m === "gameover") return canSkipGameOver() ? [BTN_TITLE] : [];
   return [];
@@ -4121,9 +4161,12 @@ addEventListener("keydown", (e) => {
   // The menus own the rest of the keyboard before the ninja does, so Z cannot
   // buffer a jump on the title screen and land it the moment play begins.
   if (mode === "title") {
+    if (e.code === "KeyK") { mode = "credits"; return; }
     if (e.code === "Space" || e.code === "Enter" || e.code === "KeyZ") startGame();
     return;
   }
+  // Any key leaves the credits. It is a page to read, not a menu to operate.
+  if (mode === "credits") { mode = "title"; return; }
   if (mode === "gameover") {
     if (!canSkipGameOver()) return;
     if (e.code === "KeyR") startGame();                     // straight to a retry
@@ -4154,6 +4197,8 @@ canvas.addEventListener("click", (ev) => {
   const b = hitButton(canvasPos(ev));
   if (!b) return;
   if (b === BTN_START) startGame();
+  else if (b === BTN_CREDITS) mode = "credits";
+  else if (b === BTN_BACK) mode = "title";
   else if (b === BTN_RESUME) togglePause();
   else if (b === BTN_RESTART) restart();
   else if (b === BTN_TITLE) toTitle();
@@ -7263,6 +7308,28 @@ function drawButton(b, scale) {
              on ? "#141018" : "#FFE45E", px);
 }
 
+function drawCredits() {
+  ctx.fillStyle = "rgba(6,8,13,0.90)";
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  const hair = 1 / RENDER_SCALE;
+  ctx.fillStyle = "#FFE45E";
+  ctx.fillRect(84, 30, VIEW_W - 168, hair * 2);
+  ctx.fillRect(84, VIEW_H - 62, VIEW_W - 168, hair * 2);
+  const t1 = "CREDITS";
+  drawTextHD(t1, (VIEW_W - textWidthHD(t1, 5)) / 2, 40, "#FFE45E", 5);
+  // Left-aligned on a common margin rather than centred: a centred list of
+  // mixed-length lines has no edge for the eye to follow down.
+  const x0 = 96;
+  CREDITS.forEach(([indent, text, col], i) => {
+    // Pitch derived from the list length rather than fixed: the list grew from
+    // twelve lines to sixteen when the music became an asset, and a fixed 16px
+    // pitch ran the last two entries through the bottom rule.
+    const pitch = Math.min(16, Math.floor((VIEW_H - 68 - 74) / CREDITS.length));
+    drawTextHD(text, x0 + indent * 14, 72 + i * pitch, col, indent >= 2 ? 2 : 3);
+  });
+  drawButton(BTN_BACK, 2);
+}
+
 function drawTitle() {
   // The live alley stays visible behind the logo -- dimmed, not replaced.
   ctx.fillStyle = "rgba(8,10,16,0.66)";
@@ -7318,13 +7385,14 @@ function drawTitle() {
   });
 
   drawButton(BTN_START, 3);
+  drawButton(BTN_CREDITS, 2);
 
   /* Three rows now, not two: the dash is on this list because a move nobody is
      told about is a move nobody uses, and it is the only control that is not
      also written on the HUD. */
   const legend = ["Z JUMP    X BLADE    C SHURIKEN",
                   "SHIFT OR A - DASH",
-                  "SPACE PAUSE    R RESTART    M MUTE"];
+                  "SPACE PAUSE   R RESTART   M MUTE   K CREDITS"];
   for (let i = 0; i < legend.length; i++)
     drawTextHD(legend[i], (VIEW_W - textWidthHD(legend[i], 3)) / 2, 248 + i * 15,
              i === 1 ? "#9FD0FF" : "#8E9AAD", 3);
@@ -7441,13 +7509,16 @@ function renderWorld() {
                     Math.min(FLASH_MAX, flash * FLASH_GAIN).toFixed(3) + ")";
     ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   }
-  // No HUD on the title screen: nothing it reports is meaningful yet.
-  if (mode !== "title" && mode !== "gameover") {
+  // No HUD on the title screen: nothing it reports is meaningful yet. Nor on
+  // the credits, which is a page to read and had the ammo plate over its first
+  // two lines.
+  if (mode !== "title" && mode !== "gameover" && mode !== "credits") {
     drawHud();
     if (showDebug) drawDebug();
   }
 
   if (mode === "title") drawTitle();
+  else if (mode === "credits") drawCredits();
   else if (mode === "gameover") drawGameOver();
   else if (mode === "paused") drawPause();
   else if (mode === "clear") {

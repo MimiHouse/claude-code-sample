@@ -1,68 +1,71 @@
 {
  "atlas": "sprites.png",
+ "audio": {
+  "music": "music.ogg"
+ },
  "frames": {
   "charger/attack": {
-   "dh": 53,
-   "dw": 53,
-   "h": 106,
-   "w": 106,
+   "dh": 52,
+   "dw": 62,
+   "h": 104,
+   "w": 124,
    "x": 0,
    "y": 0
   },
   "charger/base": {
-   "dh": 53,
-   "dw": 53,
-   "h": 106,
-   "w": 106,
-   "x": 106,
+   "dh": 52,
+   "dw": 62,
+   "h": 104,
+   "w": 124,
+   "x": 124,
    "y": 0
   },
   "charger/coil": {
-   "dh": 53,
-   "dw": 53,
-   "h": 106,
-   "w": 106,
-   "x": 212,
+   "dh": 52,
+   "dw": 62,
+   "h": 104,
+   "w": 124,
+   "x": 248,
    "y": 0
   },
   "charger/lunge": {
-   "dh": 53,
-   "dw": 53,
-   "h": 106,
-   "w": 106,
-   "x": 318,
+   "dh": 52,
+   "dw": 62,
+   "h": 104,
+   "w": 124,
+   "x": 372,
    "y": 0
   },
   "charger/walkA": {
-   "dh": 53,
-   "dw": 53,
-   "h": 106,
-   "w": 106,
-   "x": 424,
+   "dh": 52,
+   "dw": 62,
+   "h": 104,
+   "w": 124,
+   "x": 496,
    "y": 0
   },
   "charger/walkB": {
-   "dh": 53,
-   "dw": 53,
-   "h": 106,
-   "w": 106,
-   "x": 530,
+   "dh": 52,
+   "dw": 62,
+   "h": 104,
+   "w": 124,
+   "x": 620,
    "y": 0
   },
   "charger/walkC": {
-   "dh": 53,
-   "dw": 53,
-   "h": 106,
-   "w": 106,
-   "x": 636,
+   "dh": 52,
+   "dw": 62,
+   "h": 104,
+   "w": 124,
+   "x": 744,
    "y": 0
   },
   "charger/walkD": {
-   "dh": 53,
-   "dw": 53,
-   "h": 106,
-   "w": 106,
-   "x": 742,
+   "dh": 52,
+   "dw": 62,
+   "h": 104,
+   "w": 124,
+   "x": 868,
    "y": 0
   },
   "ninja/crouch": {
@@ -71,7 +74,7 @@
    "h": 100,
    "w": 138,
    "x": 0,
-   "y": 106
+   "y": 104
   },
   "ninja/crouchThrow": {
    "dh": 50,
@@ -79,7 +82,7 @@
    "h": 100,
    "w": 138,
    "x": 138,
-   "y": 106
+   "y": 104
   },
   "ninja/draw": {
    "dh": 50,
@@ -87,7 +90,7 @@
    "h": 100,
    "w": 138,
    "x": 276,
-   "y": 106
+   "y": 104
   },
   "ninja/idle": {
    "dh": 50,
@@ -95,7 +98,7 @@
    "h": 100,
    "w": 138,
    "x": 414,
-   "y": 106
+   "y": 104
   },
   "ninja/idleB": {
    "dh": 50,
@@ -103,7 +106,7 @@
    "h": 100,
    "w": 138,
    "x": 552,
-   "y": 106
+   "y": 104
   },
   "ninja/jump": {
    "dh": 50,
@@ -111,7 +114,7 @@
    "h": 100,
    "w": 138,
    "x": 690,
-   "y": 106
+   "y": 104
   },
   "ninja/land": {
    "dh": 50,
@@ -119,7 +122,7 @@
    "h": 100,
    "w": 138,
    "x": 828,
-   "y": 106
+   "y": 104
   },
   "ninja/slash": {
    "dh": 50,
@@ -127,7 +130,7 @@
    "h": 100,
    "w": 138,
    "x": 966,
-   "y": 106
+   "y": 104
   },
   "ninja/throw": {
    "dh": 50,
@@ -135,7 +138,7 @@
    "h": 100,
    "w": 138,
    "x": 0,
-   "y": 206
+   "y": 204
   },
   "ninja/walkA": {
    "dh": 50,
@@ -143,7 +146,7 @@
    "h": 100,
    "w": 138,
    "x": 138,
-   "y": 206
+   "y": 204
   },
   "ninja/walkB": {
    "dh": 50,
@@ -151,7 +154,7 @@
    "h": 100,
    "w": 138,
    "x": 276,
-   "y": 206
+   "y": 204
   },
   "ninja/walkC": {
    "dh": 50,
@@ -159,7 +162,7 @@
    "h": 100,
    "w": 138,
    "x": 414,
-   "y": 206
+   "y": 204
   },
   "ninja/walkD": {
    "dh": 50,
@@ -167,7 +170,7 @@
    "h": 100,
    "w": 138,
    "x": 552,
-   "y": 206
+   "y": 204
   },
   "rusher/base": {
    "dh": 48,
@@ -175,7 +178,7 @@
    "h": 96,
    "w": 96,
    "x": 0,
-   "y": 306
+   "y": 304
   },
   "rusher/coil": {
    "dh": 48,
@@ -183,7 +186,7 @@
    "h": 96,
    "w": 96,
    "x": 96,
-   "y": 306
+   "y": 304
   },
   "rusher/leap": {
    "dh": 48,
@@ -191,7 +194,7 @@
    "h": 96,
    "w": 96,
    "x": 192,
-   "y": 306
+   "y": 304
   },
   "rusher/walkA": {
    "dh": 48,
@@ -199,7 +202,7 @@
    "h": 96,
    "w": 96,
    "x": 288,
-   "y": 306
+   "y": 304
   },
   "rusher/walkB": {
    "dh": 48,
@@ -207,7 +210,7 @@
    "h": 96,
    "w": 96,
    "x": 384,
-   "y": 306
+   "y": 304
   },
   "rusher/walkC": {
    "dh": 48,
@@ -215,7 +218,7 @@
    "h": 96,
    "w": 96,
    "x": 480,
-   "y": 306
+   "y": 304
   },
   "rusher/walkD": {
    "dh": 48,
@@ -223,7 +226,7 @@
    "h": 96,
    "w": 96,
    "x": 576,
-   "y": 306
+   "y": 304
   },
   "rusher/wallGrab": {
    "dh": 48,
@@ -231,7 +234,7 @@
    "h": 96,
    "w": 96,
    "x": 672,
-   "y": 306
+   "y": 304
   },
   "rusher/wallOver": {
    "dh": 48,
@@ -239,133 +242,175 @@
    "h": 96,
    "w": 96,
    "x": 0,
-   "y": 402
+   "y": 400
   },
   "warden/aim": {
-   "dh": 46,
-   "dw": 64,
-   "h": 92,
-   "w": 128,
-   "x": 0,
-   "y": 498
+   "dh": 48,
+   "dw": 39,
+   "h": 96,
+   "w": 78,
+   "x": 96,
+   "y": 400
   },
   "warden/base": {
-   "dh": 46,
-   "dw": 64,
-   "h": 92,
-   "w": 128,
-   "x": 128,
-   "y": 498
+   "dh": 48,
+   "dw": 39,
+   "h": 96,
+   "w": 78,
+   "x": 174,
+   "y": 400
   },
   "warden/coil": {
-   "dh": 46,
-   "dw": 64,
-   "h": 92,
-   "w": 128,
-   "x": 256,
-   "y": 498
+   "dh": 48,
+   "dw": 39,
+   "h": 96,
+   "w": 78,
+   "x": 252,
+   "y": 400
   },
   "warden/duck": {
-   "dh": 46,
-   "dw": 64,
-   "h": 92,
-   "w": 128,
-   "x": 384,
-   "y": 498
+   "dh": 48,
+   "dw": 39,
+   "h": 96,
+   "w": 78,
+   "x": 330,
+   "y": 400
   },
   "warden/sweep": {
-   "dh": 46,
-   "dw": 64,
-   "h": 92,
-   "w": 128,
-   "x": 512,
-   "y": 498
+   "dh": 48,
+   "dw": 39,
+   "h": 96,
+   "w": 78,
+   "x": 408,
+   "y": 400
   },
   "warden/walkA": {
-   "dh": 46,
-   "dw": 64,
-   "h": 92,
-   "w": 128,
-   "x": 640,
-   "y": 498
+   "dh": 48,
+   "dw": 39,
+   "h": 96,
+   "w": 78,
+   "x": 486,
+   "y": 400
   },
   "warden/walkB": {
-   "dh": 46,
-   "dw": 64,
-   "h": 92,
-   "w": 128,
-   "x": 768,
-   "y": 498
+   "dh": 48,
+   "dw": 39,
+   "h": 96,
+   "w": 78,
+   "x": 564,
+   "y": 400
   },
   "warden/walkC": {
-   "dh": 46,
-   "dw": 64,
-   "h": 92,
-   "w": 128,
-   "x": 896,
-   "y": 498
+   "dh": 48,
+   "dw": 39,
+   "h": 96,
+   "w": 78,
+   "x": 0,
+   "y": 496
   },
   "warden/walkD": {
-   "dh": 46,
-   "dw": 64,
-   "h": 92,
-   "w": 128,
-   "x": 0,
-   "y": 590
+   "dh": 48,
+   "dw": 39,
+   "h": 96,
+   "w": 78,
+   "x": 78,
+   "y": 496
   }
  },
  "meta": {
   "bodyPx": 96,
   "characters": {
    "charger": {
-    "bodyLuma": 130.9,
+    "author": "Ragewortt",
+    "bodyLuma": 118.9,
+    "creditRequired": true,
     "frame": {
-     "dh": 53,
-     "dw": 53,
-     "h": 106,
-     "w": 106
+     "dh": 52,
+     "dw": 62,
+     "h": 104,
+     "w": 124
     },
-    "pack": "freeknight",
+    "licence": "CC-BY 3.0",
+    "pack": "fh-samurai",
     "poses": 8
    },
    "ninja": {
-    "bodyLuma": 79.7,
+    "author": "gameart2d.com",
+    "bodyLuma": 88.0,
+    "creditRequired": false,
     "frame": {
      "dh": 50,
      "dw": 69,
      "h": 100,
      "w": 138
     },
+    "licence": "CC0 / public domain",
     "pack": "ninjaadventurenew",
     "poses": 13
    },
    "rusher": {
-    "bodyLuma": 136.2,
+    "author": "gameart2d.com",
+    "bodyLuma": 135.8,
+    "creditRequired": false,
     "frame": {
      "dh": 48,
      "dw": 48,
      "h": 96,
      "w": 96
     },
+    "licence": "CC0 / public domain",
     "pack": "ninjagirlnew",
     "poses": 9
    },
    "warden": {
-    "bodyLuma": 168.0,
+    "author": "Ragewortt",
+    "bodyLuma": 165.9,
+    "creditRequired": true,
     "frame": {
-     "dh": 46,
-     "dw": 64,
-     "h": 92,
-     "w": 128
+     "dh": 48,
+     "dw": 39,
+     "h": 96,
+     "w": 78
     },
-    "pack": "ninjaadventurenew",
+    "licence": "CC-BY 3.0",
+    "pack": "fh-samurai",
     "poses": 9
    }
   },
+  "creditRequired": [
+   "Ragewortt"
+  ],
   "generator": "frontend/tools/pack_assets.py",
-  "licence": "CC0 / public domain (gameart2d.com freebies)",
+  "licence": "mixed: CC0 and CC-BY 3.0; see characters[].licence",
+  "music": {
+   "author": "Skrjablin",
+   "file": "music.ogg",
+   "licence": "CC0 / public domain",
+   "page": "https://opengameart.org/content/6-genuinely-c64-soundtracks-released-as-public-domain-may-2017",
+   "title": "C64 Uptempo Chiptune"
+  },
+  "packLicences": {
+   "fh-samurai": {
+    "author": "Ragewortt",
+    "credit": true,
+    "name": "CC-BY 3.0",
+    "url": "https://opengameart.org/content/fantasy-heroes-samurai-sprite-sheet"
+   },
+   "ninjaadventurenew": {
+    "author": "gameart2d.com",
+    "credit": false,
+    "name": "CC0 / public domain",
+    "url": "https://www.gameart2d.com/license.html"
+   },
+   "ninjagirlnew": {
+    "author": "gameart2d.com",
+    "credit": false,
+    "name": "CC0 / public domain",
+    "url": "https://www.gameart2d.com/license.html"
+   }
+  },
   "sources": [
-   "freeknight",
+   "fh-samurai",
    "ninjaadventurenew",
    "ninjagirlnew"
   ]
