@@ -69,6 +69,8 @@ globalThis.__t = {
   get bullets() { return bullets; },
   get shurikens() { return shurikens; },
   get hazards() { return hazards; },
+  PERCH_SCAN, PERCH_WIND, PERCH_DIVE_VX, PERCH_DIVE_VY, PERCH_LAND,
+  PERCH_HIT_W, PERCH_HIT_TOP, PERCH_HIT_BOT, enemyPoseOf, drawEnemyWeapon,
   get pickups() { return pickups; },
   get flags() { return flags; },
   get particles() { return particles; },
@@ -324,6 +326,10 @@ function coverInFrontOf(e) {
 function pickEnemy(kind, clearTiles, posted = false) {
   return t.enemies.find(e => {
     if (e.kind !== kind || !e.alive) return false;
+    // Never a ledge sentry. Every test that reaches for "a charger" wants one
+    // running its own state machine, and a perched body is running the sentry's
+    // instead -- it would answer questions about approach and aim with "perch".
+    if (e.ledge) return false;
     if (!!e.post !== posted) return false;
     const ec = Math.floor(e.x / t.TILE);
     for (let c = ec - clearTiles; c <= ec; c++) if (!clearCol(c)) return false;
@@ -435,9 +441,9 @@ check("straight-line run is about a minute of play", runSec > 30 && runSec < 60,
       `${runSec.toFixed(0)}s pure running, plus combat`);
 
 console.log("\n== enemy roster + placement (req 3) ==");
-const chg = t.enemies.filter(e => e.kind === "charger");
-const rsh = t.enemies.filter(e => e.kind === "rusher");
-const gun = t.enemies.filter(e => e.kind === "warden");
+const chg = t.enemies.filter(e => e.kind === "charger" && !e.ledge);
+const rsh = t.enemies.filter(e => e.kind === "rusher" && !e.ledge);
+const gun = t.enemies.filter(e => e.kind === "warden" && !e.ledge);
 /* The roster doubled. Expressed as a floor and a ratio rather than as one
    number, because it is going to keep moving and the property that matters is
    "about twice what it was, and all three patterns present in quantity". */
@@ -461,9 +467,49 @@ spread.sort((a, b) => a - b);
 check("enemies spread from segment 2 to the last segment (seg 1 is a quiet intro)",
       spread[0] < 80 && spread[spread.length - 1] > 340,
       `tiles ${spread[0]}..${spread[spread.length - 1]}`);
-// All combat must sit on the player's walking level or bullets fly overhead.
-check("all enemies are on the ground row the player walks",
-      t.enemies.every(e => e.y + e.h === 20 * t.TILE));
+/* HEIGHT IS A THREAT AXIS NOW.
+   The rule used to be that every enemy stood on the player's own walking level,
+   because a warden on a ledge fires horizontally and the shot sails over your
+   head -- elevated enemies could not fight and could not be fought. That is
+   still true of an elevated enemy running its NORMAL states, so the ones up
+   there run a different machine: perch, crouch, drop on you, then behave like
+   anything else. These checks are the terms that make that fair. */
+const onFloor = t.enemies.filter(e => e.y + e.h === 20 * t.TILE);
+const sentries = t.enemies.filter(e => e.ledge);
+check("every enemy is either on the alley floor or a ledge sentry",
+      onFloor.length + sentries.length === t.enemies.length,
+      `${onFloor.length} floor + ${sentries.length} sentries = ${t.enemies.length}`);
+check("no enemy is elevated WITHOUT being a sentry",
+      !t.enemies.some(e => e.y + e.h !== 20 * t.TILE && !e.ledge));
+check("sentries occupy more than one height",
+      new Set(sentries.map(e => e.y)).size >= 2,
+      `heights ${[...new Set(sentries.map(e => 320 - (e.y + e.h)))].sort((a, b) => a - b).join(",")}px above the floor`);
+check("sentries cover all three kinds", new Set(sentries.map(e => e.kind)).size === 3,
+      JSON.stringify(sentries.reduce((a, e) => (a[e.kind] = (a[e.kind] || 0) + 1, a), {})));
+check("every sentry starts perched, not walking",
+      sentries.every(e => e.state === "perch"));
+check("a perched sentry is harmless", sentries.every(e => !e.lethal));
+/* A dive needs somewhere to land. A marker over a pit, or on a platform with
+   nothing but more air beneath it, is a drop into the kill plane -- which reads
+   as an enemy deleting itself the moment you walk past. */
+let diveHasFloor = true, diveLands = [];
+for (const e of sentries) {
+  const tx = Math.floor((e.x + e.w / 2) / t.TILE);
+  const feetRow = Math.floor((e.y + e.h) / t.TILE);
+  let found = -1;
+  for (let r = feetRow; r < t.ROWS; r++) if (t.solidAt(tx, r)) { found = r; break; }
+  if (found < 0) diveHasFloor = false;
+  else diveLands.push(found);
+}
+check("every sentry has a floor under its drop", diveHasFloor,
+      `landing rows ${[...new Set(diveLands)].sort((a, b) => a - b).join(",")}`);
+/* The crouch is the ONLY warning a drop gets, so it has to outlast a human
+   reaction. 250ms is the usual figure for a simple visual cue; the window is
+   deliberately well clear of it. */
+check("the dive is telegraphed longer than a reaction takes", t.PERCH_WIND >= 0.30,
+      `${(t.PERCH_WIND * 1000).toFixed(0)}ms crouch`);
+check("the scan strip is narrower than the screen", t.PERCH_SCAN < t.VIEW_W / 2,
+      `${t.PERCH_SCAN}px vs ${t.VIEW_W / 2}px half-screen`);
 
 console.log("\n== ninja steps back, stage does not (req 2) ==");
 t.restart();
@@ -657,7 +703,7 @@ check("once the cooldown is up, another one goes -- while the first is still in 
 
 // Kill a charger with a shuriken.
 t.restart();
-const target = t.enemies.find(e => e.kind === "charger");
+const target = t.enemies.find(e => e.kind === "charger" && !e.ledge);
 stand(Math.floor(target.x / t.TILE) - 5);
 const killsBefore = t.kills;
 t.throwShuriken();
@@ -732,7 +778,7 @@ for (let i = 0; i < 200 && !died; i++) { tickNoWave(1); died = t.deaths > 0; }
 check("the swing kills the player", died, `deaths=${t.deaths}`);
 // Body contact alone must be harmless.
 t.restart();
-const c2 = pickEnemy("charger", 4) || t.enemies.find(e => e.kind === "charger");
+const c2 = pickEnemy("charger", 4) || t.enemies.find(e => e.kind === "charger" && !e.ledge);
 for (const e of t.enemies) if (e !== c2) e.alive = false;
 stand(Math.floor(c2.x / t.TILE));
 t.ninja.x = c2.x; t.ninja.invuln = 0;
@@ -744,7 +790,7 @@ check("body contact is harmless (only weapons kill)", t.deaths === dBefore,
 
 console.log("\n== warden pattern + crouch dodge (req 5 x 6) ==");
 t.restart();
-const g = pickEnemy("warden", 10) || t.enemies.find(e => e.kind === "warden");
+const g = pickEnemy("warden", 10) || t.enemies.find(e => e.kind === "warden" && !e.ledge);
 const gTile = Math.floor(g.x / t.TILE);
 for (const e of t.enemies) if (e !== g) e.alive = false;
 stand(gTile - 9);
@@ -775,7 +821,7 @@ for (const [k, v] of Object.entries({
 
 function bulletTrial(crouch) {
   t.restart();
-  const gg = t.enemies.find(e => e.kind === "warden");
+  const gg = t.enemies.find(e => e.kind === "warden" && !e.ledge);
   for (const e of t.enemies) if (e !== gg) e.alive = false;   // isolate the warden
   // Stand OUTSIDE the polearm's reach. Inside it the warden swings instead of
   // throwing, and a sweep is a blade -- not something a crouch is meant to
@@ -893,7 +939,7 @@ console.log("\n== touching an enemy is survivable; its ATTACK is not ==");
 {
   // Same for the rusher's leap.
   t.restart();
-  const rr = t.enemies.find(e => e.kind === "rusher");
+  const rr = t.enemies.find(e => e.kind === "rusher" && !e.ledge);
   for (const e of t.enemies) if (e !== rr) e.alive = false;
   stand(Math.floor(rr.x / t.TILE) - 3);
   t.ninja.invuln = 9999;
@@ -915,7 +961,7 @@ console.log("\n== touching an enemy is survivable; its ATTACK is not ==");
   // The hazard has to TRACK the dash. Pushed once for the whole move it would
   // sit where the attack started, which is the bug this shape avoids.
   t.restart();
-  const e0 = t.enemies.find(x => x.kind === "charger");
+  const e0 = t.enemies.find(x => x.kind === "charger" && !x.ledge);
   e0.facing = 1;
   const x0 = e0.x;
   t.hazards.length = 0;
@@ -966,10 +1012,13 @@ check("EVERY placed enemy is restored, including the ones you killed",
       t.enemies.filter(isPlaced).length === placedCount &&
       t.enemies.filter(isPlaced).every(e => e.alive),
       `${t.enemies.filter(e => isPlaced(e) && e.alive).length}/${placedCount} alive`);
+// "perch" is the resting state of a ledge sentry, exactly as "idle" is a
+// charger's and "wait" is a rusher's: a death has to put a sentry back on its
+// roof, not leave it wherever its dive ended.
 check("restored enemies are back at their posts and idle",
       t.enemies.filter(e => !e.wave).every(e =>
         Math.abs(e.x + e.w / 2 - e.homeX) < 1 &&
-        (e.state === "idle" || e.state === "wait")));
+        (e.state === "idle" || e.state === "wait" || e.state === "perch")));
 check("projectiles and hazards are cleared",
       t.bullets.length === 0 && t.hazards.length === 0 && t.shurikens.length === 0);
 check("collected flags are NOT lost (death is not a full restart)",
@@ -1214,7 +1263,12 @@ check("clock advanced", t.clock > 3, `clock=${t.clock.toFixed(2)}s`);
 
 console.log("\n== impact effects ==");
 t.restart();
-const fx1 = t.enemies.find(e => e.kind === "charger");
+/* The sentries are stood down for this block. It counts the particles ONE kill
+   produces, and a sentry dropping into the alley nearby lands its own dust
+   burst into the same array -- which is correct behaviour and the wrong thing
+   to be measuring here. */
+for (const e of t.enemies) if (e.ledge) e.alive = false;
+const fx1 = t.enemies.find(e => e.kind === "charger" && !e.ledge);
 stand(Math.floor(fx1.x / t.TILE) - 5);
 t.throwShuriken();
 let gone = false;
@@ -1340,7 +1394,7 @@ check("the leap puts an attack box in front of it", (() => {
 check("...and never makes its body lethal to touch", r0.lethal === false);
 // Touching a non-leaping rusher must stay harmless.
 t.restart();
-const r1 = pickEnemy("rusher", 4) || t.enemies.find(e => e.kind === "rusher");
+const r1 = pickEnemy("rusher", 4) || t.enemies.find(e => e.kind === "rusher" && !e.ledge);
 for (const e of t.enemies) if (e !== r1) e.alive = false;
 stand(Math.floor(r1.x / t.TILE));
 t.ninja.x = r1.x; r1.state = "run"; r1.lethal = false;
@@ -1423,7 +1477,7 @@ console.log("\n== enemies hop over structures ==");
 // seg1 has a 2-tile hop block at tiles 24-25; park a charger behind it.
 t.restart();
 {
-  const probe = t.enemies.find(x => x.kind === "charger");
+  const probe = t.enemies.find(x => x.kind === "charger" && !x.ledge);
   probe.x = 26 * t.TILE; probe.y = 20 * t.TILE - t.ENEMY_H; probe.onGround = true;
   check("wallAhead sees the hop block to the left", t.wallAhead(probe, -1) === true);
   check("clearAbove confirms it is only 2 tiles tall", t.clearAbove(probe, -1) === true);
@@ -1432,7 +1486,7 @@ t.restart();
 }
 t.restart();
 // Not a posted one: those never advance, which is the point of them.
-const hopper = t.enemies.find(e => e.kind === "charger" && !e.post);
+const hopper = t.enemies.find(e => e.kind === "charger" && !e.ledge && !e.post);
 for (const e of t.enemies) if (e !== hopper) e.alive = false;
 hopper.x = 27 * t.TILE; hopper.y = 20 * t.TILE - t.ENEMY_H;
 hopper.vx = 0; hopper.vy = 0; hopper.onGround = true; hopper.state = "charge";
@@ -1505,8 +1559,8 @@ check("two enemies start perfectly overlapped", t.overlaps(a1, a2));
 {
   // And a deep pair does come apart, by walking.
   t.restart(); stand(60);
-  const b1 = t.enemies.find(e => e.alive && e.kind === "charger" && !e.post);
-  const b2 = t.enemies.find(e => e.alive && e !== b1 && e.kind === "charger" && !e.post);
+  const b1 = t.enemies.find(e => e.alive && e.kind === "charger" && !e.ledge && !e.post);
+  const b2 = t.enemies.find(e => e.alive && e !== b1 && e.kind === "charger" && !e.ledge && !e.post);
   for (const e of t.enemies) if (e !== b1 && e !== b2) e.alive = false;
   /* Placed OUTSIDE the lunge band. At 90px they are inside it, and a lunge is
      a fixed dash followed by half a second of recovery with the velocity pinned
@@ -1793,7 +1847,7 @@ check("every ground block is exactly COVER_H tall", badBlocks.length === 0,
       badBlocks.length ? badBlocks.slice(0, 6).join(", ") : "all 32px");
 // Each warden must have cover on the approach side.
 let uncovered = [];
-for (const g of t.enemies.filter(e => e.kind === "warden")) {
+for (const g of t.enemies.filter(e => e.kind === "warden" && !e.ledge)) {
   const gc = Math.floor(g.x / t.TILE);
   let found = false;
   for (let c = gc - 10; c < gc; c++) if (t.solidAt(c, 19) && t.solidAt(c, 18)) found = true;
@@ -1804,7 +1858,7 @@ check("every warden has cover within 10 tiles of its approach",
       uncovered.length ? "bare wardens at tiles " + uncovered.join(",") : "all 9 covered");
 // A bullet must actually be stopped by a cover block.
 t.restart();
-const cg = t.enemies.find(e => e.kind === "warden");
+const cg = t.enemies.find(e => e.kind === "warden" && !e.ledge);
 for (const e of t.enemies) if (e !== cg) e.alive = false;
 const cgTile = Math.floor(cg.x / t.TILE);
 let coverCol = -1;
@@ -3117,9 +3171,9 @@ check("the cooldown is longer than the lunge itself",
 // The leash invariant must survive the dash: that is what the first attempt broke.
 t.restart();
 for (const e of t.enemies) e.alive = false;
-const x14_leashFoes = t.enemies.filter(e => e.kind === "charger");
+const x14_leashFoes = t.enemies.filter(e => e.kind === "charger" && !e.ledge);
 let x14_worst = 0;
-for (const foe of t.enemies) foe.alive = foe.kind === "charger";
+for (const foe of t.enemies) foe.alive = foe.kind === "charger" && !foe.ledge;
 for (let i = 0; i < 900; i++) {
   tickIso(1);
   t.keys.add("ArrowRight");
@@ -3146,7 +3200,7 @@ check("at close range it still closes on foot and swings",
 console.log("\n== warden: burst fire and giving ground (req 14) ==");
 function x14_gunTrial(tilesAway) {
   t.restart();
-  const x14_gg = pickEnemy("warden", 10) || t.enemies.find(e => e.kind === "warden");
+  const x14_gg = pickEnemy("warden", 10) || t.enemies.find(e => e.kind === "warden" && !e.ledge);
   for (const e of t.enemies) if (e !== x14_gg) e.alive = false;
   stand(Math.floor(x14_gg.x / t.TILE) - tilesAway);
   let shots = 0;
@@ -3175,7 +3229,7 @@ check("burst rounds come fast enough that one crouch covers them",
 // The crouch mechanic is load-bearing: EVERY round of a burst must pass over a
 // ducking player, or the burst would quietly break the game's core answer.
 t.restart();
-const x14_bg = pickEnemy("warden", 10) || t.enemies.find(e => e.kind === "warden");
+const x14_bg = pickEnemy("warden", 10) || t.enemies.find(e => e.kind === "warden" && !e.ledge);
 for (const e of t.enemies) if (e !== x14_bg) e.alive = false;
 stand(Math.floor(x14_bg.x / t.TILE) - 5);
 const x14_heights = new Set();
@@ -3191,7 +3245,7 @@ check("every burst round sits at the same crouch-dodgeable height",
 
 // Giving ground, bounded.
 t.restart();
-const x14_sg = pickEnemy("warden", 10) || t.enemies.find(e => e.kind === "warden");
+const x14_sg = pickEnemy("warden", 10) || t.enemies.find(e => e.kind === "warden" && !e.ledge);
 for (const e of t.enemies) if (e !== x14_sg) e.alive = false;
 stand(Math.floor(x14_sg.x / t.TILE) - 2);
 const x14_gunHome = x14_sg.homeX;
@@ -3504,7 +3558,7 @@ console.log("\n== the warden holds its post with a visible polearm (req 19) ==")
 // Step inside its reach and it swings.
 function sweepTrial(tilesAway, crouch, observe) {
   t.restart();
-  const wd = t.enemies.find(e => e.kind === "warden");
+  const wd = t.enemies.find(e => e.kind === "warden" && !e.ledge);
   for (const e of t.enemies) if (e !== wd) e.alive = false;
   const col = Math.floor(wd.x / t.TILE) - tilesAway;
   stand(col);
@@ -3559,7 +3613,7 @@ check("...where it throws instead of swinging",
 
 // It is still the one that holds its ground.
 t.restart();
-const posts = t.enemies.filter(e => e.kind === "warden").map(e => ({ e, home: e.homeX }));
+const posts = t.enemies.filter(e => e.kind === "warden" && !e.ledge).map(e => ({ e, home: e.homeX }));
 for (let i = 0; i < 600; i++) { t.ninja.invuln = 999; t.keys.add("ArrowRight"); tickNoWave(1); }
 t.keys.clear();
 const strayed = posts.filter(({ e, home }) =>

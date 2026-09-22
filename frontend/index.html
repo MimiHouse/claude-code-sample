@@ -60,10 +60,32 @@ const WALK_RATE_SMOOTH = 0.15;
 
 // Body is 3 tiles tall, so the apex MUST clear 4 tiles: a platform you can jump
 // onto (<=3 rows) would otherwise be one you cannot walk under.
-const GRAVITY_RISE = 1000, GRAVITY_FALL = 2400;
-const JUMP_VEL = 400, JUMP_CUT = 140, MAX_FALL = 720;
+/* The jump is TIGHTER than it was, not bigger. Velocity and gravity went up
+   together -- 400/1000/2400 became 430/1180/2700 -- which holds the apex at
+   v^2/2g = 78px, still the ~4.8 tiles the stage geometry is cut for, while the
+   rise shortens from 0.40s to 0.36s and the fall is faster again. Every height
+   the map asks for is still reachable; you just stop hanging in the air on the
+   way. Raising JUMP_VEL alone would have raised the apex and broken the
+   4-row step rule with it. */
+const GRAVITY_RISE = 1180, GRAVITY_FALL = 2700;
+const JUMP_VEL = 430, JUMP_CUT = 150, MAX_FALL = 780;
 const COYOTE_TIME = 0.10, JUMP_BUFFER = 0.10;
-const LAND_VY = 260, LAND_TIME = 0.14;
+const LAND_VY = 280, LAND_TIME = 0.12;
+
+/* DASH -- Shift, or A. The alley is forward-only and MOVE_SPEED is what the
+   stage par budget is reckoned from, so a dash cannot be "faster walking":
+   that would rewrite the clock every run is scored against. It grants
+   DISTANCE, not speed -- a fixed 0.16s at DASH_SPEED with gravity suspended,
+   which covers 54px and then hands the body back at walking pace.
+
+   Gravity off makes it a flat slide rather than a hop, which is the thing that
+   reads as shunpo. One dash per airtime, so it lengthens a leap without
+   becoming flight, and a jump CANCELS it -- dash, then jump out of it, is the
+   combination worth discovering. No invulnerability: a dash into a blade still
+   kills, or it would be an answer to every attack in the game. */
+const DASH_SPEED = 340, DASH_TIME = 0.16, DASH_CD = 0.42;
+const DASH_AIR_MAX = 1;
+const GHOST_LIFE = 0.17, GHOST_GAP = 2 / 60;
 
 // Every character is authored at NATIVE resolution -- one array cell per screen
 // pixel -- so a 32x48 sprite is drawn with 1536 pixels instead of the 384 a
@@ -240,6 +262,28 @@ const CHG_SPEED = 95, CHG_AGGRO = 210, CHG_DY = 44, CHG_MELEE = 46;
    It is per-attempt: reset on respawn as well as on restart, because the
    respawn is where a crowd hurts most. You arrive into a stage you already know
    is full. */
+/* LEDGE SENTRIES. The old placement rule was "every enemy stands on the ground
+   the player walks on", and its reasoning was sound for the AI that existed: a
+   warden on a ledge fires horizontally and the shot sails 64px over your head,
+   so an elevated enemy was decoration that could not be fought and could not
+   fight. Ledges therefore held pickups.
+
+   This is the behaviour that makes the rule unnecessary. An enemy whose feet
+   start above the alley floor spawns PERCHED: it holds its ground, ignores the
+   normal approach states, and watches the strip of alley beneath it. Walk into
+   that strip and it commits -- a crouch, then a drop with the weapon leading --
+   and from the moment it lands it is an ordinary enemy of its kind.
+
+   The crouch is the contract. It is PERCH_WIND long and it is the only warning,
+   so it has to be longer than a human reaction and visible from below, which is
+   what the hazard preview under it is for. Nothing falls on you unannounced. */
+const PERCH_SCAN = 150;          // px of alley it watches, measured horizontally
+const PERCH_WIND = 0.42;         // the crouch before it commits
+const PERCH_DIVE_VX = 78;        // lean toward the target as it falls
+const PERCH_DIVE_VY = 130;       // pushed off, not dropped
+const PERCH_LAND = 0.30;         // the landing beat, before it can act
+const PERCH_HIT_W = 20, PERCH_HIT_TOP = 30, PERCH_HIT_BOT = -6;
+
 const ENEMY_WAKE = 2.0;
 
 /* VAULTERS: enemies that come in over the rooftops rather than off the ground.
@@ -2403,6 +2447,24 @@ function validatePose(name, rows, cols, height) {
     }
   }
 }
+/* COIL: the crouch a ledge sentry makes before it drops, and the crouch it
+   absorbs the landing with. Generated from each kind's standing pose rather
+   than drawn, because `squat` is exactly the transform wanted -- the torso
+   comes down and the feet stay where they were, which at this scale is what a
+   body gathering itself looks like. Generated per kind, so the silhouette still
+   says which enemy is on the roof.
+
+   Nine rows, not five. Five is a tenth of the body and it read as the same
+   standing pose drawn a few pixels lower -- and this crouch is the ONLY warning
+   a drop ever gets, so "hard to be sure it changed" is a failed tell.
+
+   Added before validatePose runs, deliberately: a generated pose is held to the
+   same 32x48 contract as a hand-drawn one, and squat() preserving the row count
+   is a property worth having checked rather than assumed. */
+for (const kind in ENEMY_POSES) {
+  ENEMY_POSES[kind].coil = squat(ENEMY_POSES[kind].base, 9);
+}
+
 for (const n in NINJA_POSES) validatePose(n, NINJA_POSES[n], NINJA_COLS, NINJA_ROWS);
 for (const kind in ENEMY_POSES) {
   for (const n in ENEMY_POSES[kind]) {
@@ -2424,9 +2486,22 @@ validatePose("flag", FLAG_SPRITE, FLAG_COLS, FLAG_ROWS);
    and the apex is ~4.8 tiles, so 4 rows is the only step that is both jumpable
    AND leaves headroom underneath. 3 rows seals the floor; 5 rows is unreachable.
 
-   ENEMY PLACEMENT RULE: every enemy stands on the ground the player walks on.
-   A warden on a ledge fires horizontally and its bullet sails 64px over the
-   player's head -- harmless. Ledges therefore hold pickups, not combat.       */
+   ENEMY PLACEMENT: the floor, or a LEDGE SENTRY.
+   The old rule was "every enemy stands on the ground the player walks on", and
+   its reasoning held for the AI of the time: a warden on a ledge fires
+   horizontally and the shot sails 64px over your head, so an elevated enemy
+   could neither fight nor be fought. Ledges held pickups.
+
+   A marker whose feet land above row 20 now spawns PERCHED instead (see the
+   LEDGE SENTRIES block in CONFIG). It holds the roof, watches the strip of
+   alley below it, crouches when you enter it, and drops on you with the weapon
+   leading. So height is a threat axis now rather than decoration, and the same
+   three letters mean "sentry" one row above a platform and "enemy" on the
+   floor -- there is no separate marker to remember.
+
+   A sentry still needs a floor under its drop: a marker over a pit, or on a
+   platform with another platform directly beneath it, is a dive into nothing.
+   The suite checks both.                                                     */
 
 const SEGMENTS = [
   // segment 1
@@ -2448,7 +2523,7 @@ const SEGMENTS = [
     "........................................",
     "........................................",
     "........................................",
-    "........................................",
+    "........................R...............",
     ".........XXX............XX..............",
     "...P.....XXX............XX.C..S.....F...",
     "XXXXXXXXXXXXXX..XXXXXXXXXXXXXXXXXXXXXXXX",
@@ -2471,7 +2546,7 @@ const SEGMENTS = [
     "........................................",
     "............F...........................",
     "...........XXX..........................",
-    "........................................",
+    ".....R.............G....................",
     ".....XXXX..........XXXX.................",
     "........................................",
     "...............XX.........XX............",
@@ -2496,9 +2571,9 @@ const SEGMENTS = [
     "........................................",
     "........................................",
     "........................................",
-    "...............F........................",
+    ".............S.F........................",
     ".............XXXX.......................",
-    "........................................",
+    "....................G...................",
     ".XX...XX.XX.........XXX.................",
     ".XX.G.XX.XX.S....T.....R.......R..S.....",
     "XXXXXXXXXXXXXXXXXXXXXXXXXX...XXXXXXXXXXX",
@@ -2519,9 +2594,9 @@ const SEGMENTS = [
     "........................................",
     ".........................F..............",
     ".......................XXXX.............",
-    "........................................",
+    ".................R......................",
     ".................XXX....................",
-    "........................................",
+    "..........G.............................",
     "..........XXXX..........................",
     "........................................",
     "....XXX...................XX............",
@@ -2548,7 +2623,7 @@ const SEGMENTS = [
     ".............C..........................",
     ".............XX.........................",
     "..........F.............................",
-    "..........XX............................",
+    "..........XX................R...........",
     "............................XX..........",
     "..R....S........S...R..C..S.XX....G.....",
     "XXXXXXXXXX.....XXXXXXXXXXXXXXXXXXXXXXXXX",
@@ -2569,9 +2644,9 @@ const SEGMENTS = [
     "........................................",
     "........................................",
     "........................................",
-    "........................................",
+    ".....................G..................",
     ".....................XXXX...............",
-    "........................................",
+    "...S....................................",
     "..XXXXXX................................",
     "........................................",
     "............XX..XX..X...................",
@@ -2596,9 +2671,9 @@ const SEGMENTS = [
     "........................................",
     "........................................",
     "........................................",
-    "..........................F.............",
+    "........................R.F.............",
     "........................XXXXX...........",
-    "........................................",
+    "...................G....................",
     "....XX...XX...XX.X.XX...................",
     "..T.XX.S.XX.S.XX.X.XX.G.......R.....R...",
     "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX...XXXXX",
@@ -2621,9 +2696,9 @@ const SEGMENTS = [
     "........................XXXX............",
     "........................................",
     "........................................",
-    "..................C.....................",
+    "................S.C.....................",
     "................XXXXX...................",
-    "........................................",
+    "...........................R............",
     "......XX...................XX...........",
     "....S.XX.S....S......T...R.XX......G....",
     "XXXXXXXXXXXX.XXXXXXXXXXXXXXXXXX.XXXXXXXX",
@@ -2644,11 +2719,11 @@ const SEGMENTS = [
     "........................................",
     "..........................F.............",
     "........................XXXX............",
-    "........................................",
+    "..................G.....................",
     "..................XXX...................",
     "........................................",
     "............XXXX........................",
-    "........................................",
+    "......S.................................",
     ".....XXXXX..............................",
     "..R..XXXXX.S....G....T...S....R.......S.",
     "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX...XXXX",
@@ -2671,9 +2746,9 @@ const SEGMENTS = [
     "........................................",
     "........................................",
     "........................................",
-    "........................................",
+    "..........................R.............",
     "..........................XXXX..........",
-    "........................................",
+    "................S.......................",
     "..........XX....XXXX....................",
     "..T...S...XX..R.XXXX..G.......R...F.....",
     "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
@@ -2850,11 +2925,13 @@ const ninja = {
   x: spawn.x, y: spawn.y, vx: 0, vy: 0, w: BODY_W, h: BODY_H,
   onGround: false, facing: 1, coyote: 0, buffer: 0, animTime: 0,
   throwTimer: 0, slashTimer: 0, landTimer: 0, invuln: 0, bump: 0, crouch: false,
-  walkDist: 0, walkRate: 0
+  walkDist: 0, walkRate: 0,
+  dashT: 0, dashCd: 0, dashDir: 1, airDashes: 0, ghostT: 0
 };
 
 let enemies = [], pickups = [], flags = [], shurikens = [], bullets = [], hazards = [];
 let particles = [];
+let ghosts = [];         // dash afterimages: flat stamps of past poses
 let slashes = [];        // player melee hitboxes
 let shurikenAmmo = SHURIKEN_START, throwCd = 0, wakeT = 0;
 let kills = 0, deaths = 0, flagsTaken = 0;
@@ -2886,7 +2963,12 @@ function resetEnemies() {
     kind: e.kind, x: e.x, y: e.y, w: ENEMY_W, h: ENEMY_H,
     post: !!e.post,
     vx: 0, vy: 0, onGround: false, facing: -1,
-    state: e.kind === "rusher" ? "wait" : "idle",
+    /* Perched if its feet start clear of the alley floor. Derived from the
+       spawn Y rather than written into the map, so moving a marker up onto a
+       roof is all it takes -- there is no second thing to remember. */
+    ledge: e.y + ENEMY_H < (ROWS - 2) * TILE,
+    state: e.y + ENEMY_H < (ROWS - 2) * TILE ? "perch"
+         : e.kind === "rusher" ? "wait" : "idle",
     timer: 0, alive: true, dying: 0, lethal: false, lastX: e.x, stuckT: 0,
     walkDist: 0, walkRate: 0, leapT: 0, leapDir: -1,
     // Standoff offset: without it every pursuer converges on the exact same
@@ -2911,6 +2993,8 @@ function respawn() {
   ninja.bump = 0;
   ninja.crouch = false; ninja.h = BODY_H;
   ninja.invuln = 0; ninja.walkDist = 0; ninja.walkRate = 0;
+  ninja.dashT = 0; ninja.dashCd = 0; ninja.airDashes = 0; ninja.ghostT = 0;
+  ghosts = [];
   playTime = 0;              // each life is timed from zero...
   wakeT = ENEMY_WAKE;        // ...and so does the grace before anything engages
   // The stale comment below is about the removed screen-clearing strike; what
@@ -3238,6 +3322,18 @@ function sfxBump()     { playCue("bump",     synth_sfxBump); }
 function sfxDeath()    { playCue("death",    synth_sfxDeath); }
 function sfxFlag()     { playCue("flag",     synth_sfxFlag); }
 function sfxPickup()   { playCue("pickup",   synth_sfxPickup); }
+function sfxDash()     { playCue("dash",     synth_sfxDash); }
+
+/* The dash: cloth and air, no pitch. It fires on a key the player may hold
+   down through a whole alley, so it has to sit UNDER everything -- a pitched
+   whoosh here competes with the music, and at this rate of repetition that is
+   the sound people mute the game over. Two short noise sweeps, quiet, and a
+   low body thump that carries the weight without carrying a note. */
+function synth_sfxDash() {
+  noiseHit(0.13, 0.20, "bandpass", vary(1500, 0.10), 380, 1.1, 0);
+  noiseHit(0.09, 0.11, "highpass", vary(3200, 0.10), 1400, 0.8, 0.018);
+  partial(150, 0.10, "sine", 0.07, 0);
+}
 
 /* MUSIC.
    What was here read as a set of sound effects rather than as music, and the
@@ -3606,8 +3702,12 @@ const keys = new Set();
 // without it the browser scrolls the page out from under the canvas.
 const HANDLED = new Set([
   "ArrowLeft", "ArrowRight", "ArrowDown", "KeyZ", "KeyX", "KeyC", "KeyR", "KeyD",
-  "Space", "Enter", "KeyM"
+  "Space", "Enter", "KeyM",
+  // Dash is on Shift and mirrored on A: Shift is where the hands already are,
+  // and A is there for keyboards that swallow Shift under sticky-keys.
+  "ShiftLeft", "ShiftRight", "KeyA"
 ]);
+const DASH_KEYS = new Set(["ShiftLeft", "ShiftRight", "KeyA"]);
 
 /* --- MENUS ---------------------------------------------------------------- */
 /* Buttons are plain rects in view space, hit-tested for the mouse and mirrored
@@ -3694,6 +3794,7 @@ addEventListener("keydown", (e) => {
   if (e.code === "KeyZ") ninja.buffer = JUMP_BUFFER;
   if (e.code === "KeyX") attack();
   if (e.code === "KeyC") throwShuriken();
+  if (DASH_KEYS.has(e.code)) startDash();
 });
 addEventListener("keyup", (e) => {
   if (HANDLED.has(e.code)) e.preventDefault();
@@ -3850,6 +3951,45 @@ function slash() {
     wind: SLASH_WIND, hit: false, dir: dir
   });
   sfxSlash();
+}
+
+/* The dash is refused rather than queued. A buffered dash fires after the
+   moment you wanted it, which on a 0.16s move is the difference between
+   crossing a gap and walking into it -- so a press during the cooldown is
+   simply dropped, and the cooldown is short enough that it does not matter. */
+function startDash() {
+  if (mode !== "play" || hitFreeze > 0) return;
+  if (ninja.dashT > 0 || ninja.dashCd > 0) return;
+  if (!ninja.onGround && ninja.airDashes >= DASH_AIR_MAX) return;
+  if (!ninja.onGround) ninja.airDashes++;
+  ninja.dashT = DASH_TIME;
+  ninja.dashCd = DASH_TIME + DASH_CD;
+  ninja.dashDir = ninja.facing < 0 ? -1 : 1;
+  ninja.ghostT = 0;
+  setCrouch(false);          // you cannot slide in a crouch; it would clip low
+  sfxDash();
+}
+
+/* Afterimages. A flat stamp of the pose the body was in, not a copy of the
+   sprite: one colour means the row loop can coalesce into runs, so the whole
+   trail costs about what one extra character does. Cheap enough to leave on. */
+function pushGhost() {
+  ghosts.push({ pose: poseNameOf(ninja), x: ninja.x, y: ninja.y,
+                crouch: ninja.crouch, facing: ninja.facing, t: 0 });
+}
+function updateGhosts(dt) {
+  for (const g of ghosts) g.t += dt;
+  if (ghosts.length) ghosts = ghosts.filter(g => g.t < GHOST_LIFE);
+}
+function drawGhosts() {
+  for (const g of ghosts) {
+    const k = 1 - g.t / GHOST_LIFE;
+    const topY = g.crouch ? g.y - (BODY_H - CROUCH_H) : g.y;
+    drawSilhouette(NINJA_POSES[g.pose] || NINJA_IDLE,
+                   Math.round(g.x + SPRITE_OFF_X - cam.x),
+                   Math.round(topY - cam.y), g.facing === -1,
+                   "rgba(142,196,255," + (0.44 * k * k).toFixed(3) + ")", CELL_NINJA);
+  }
 }
 
 /* Ammunition. A throw spends one and is paced by a cooldown rather than by the
@@ -4373,6 +4513,78 @@ function updateEnemy(e, dt) {
     return;
   }
 
+  /* THE PERCH runs ahead of every per-kind state machine and returns, so a
+     sentry on a roof cannot be walking the approach states of its kind while it
+     is supposed to be standing still forty pixels in the air. It is cleared for
+     good on landing -- `ledge` false -- and the body drops into its kind's
+     normal opening state, so one enemy is a sentry once and an ordinary enemy
+     for the rest of its life. */
+  if (e.ledge) {
+    switch (e.state) {
+      case "perch": {
+        e.vx = 0;
+        // It looks the way the player will come from, not at them: turning to
+        // track someone still out of range gives the ambush away.
+        e.facing = -1;
+        // Committing needs the player inside the strip AND genuinely below --
+        // someone standing on the same roof is a fight, not a dive.
+        if (Math.abs(dx) <= PERCH_SCAN && dyFeet > ENEMY_H * 0.5) {
+          e.state = "perchWind"; e.timer = PERCH_WIND;
+          e.diveDir = dx > 0 ? 1 : -1;
+        }
+        break;
+      }
+      case "perchWind":
+        // The crouch. Still harmless, and the only warning there is.
+        e.vx = 0;
+        e.facing = e.diveDir;
+        if ((e.timer -= dt) <= 0) {
+          e.state = "dive";
+          e.vx = e.diveDir * PERCH_DIVE_VX;
+          e.vy = PERCH_DIVE_VY;
+          e.onGround = false;
+        }
+        break;
+      case "dive":
+        /* Falling with the weapon leading. Lethal for the whole descent, which
+           is the point of it, and the box is pushed fresh every frame so it
+           tracks the body down instead of hanging where the drop started. */
+        e.facing = e.diveDir;
+        leadHazard(e, PERCH_HIT_W, PERCH_HIT_TOP, PERCH_HIT_BOT);
+        if (e.onGround) {
+          e.state = "perchLand"; e.timer = PERCH_LAND; e.vx = 0;
+          spawnBurst(e.x + e.w / 2, e.y + e.h, 7,
+                     ["#C8C2B4", "#9A948A", "#6E6A60"], 90, 0.28);
+        }
+        break;
+      case "perchLand":
+        // The recovery the drop is paid for with. Vulnerable, not dangerous.
+        e.vx = 0;
+        if ((e.timer -= dt) <= 0) {
+          e.ledge = false;                  // from here it is just an enemy
+          e.state = e.kind === "rusher" ? "run" : e.kind === "charger" ? "charge" : "idle";
+          e.leaps = 0; e.timer = 0;
+        }
+        break;
+      default:
+        // Any other state on a perched body is a bug elsewhere; park it.
+        e.state = "perch"; e.vx = 0;
+        break;
+    }
+    // Gravity and the ground still apply -- only "perch" and "perchWind" hold
+    // position, and they hold it by standing on the ledge like anything else.
+    if (e.state === "dive") {
+      e.vy = Math.min(e.vy + GRAVITY_FALL * 0.45 * dt, MAX_FALL);
+      moveEntity(e, e.vx * dt, e.vy * dt);
+      e.onGround = probeGround(e);
+    } else {
+      e.vy = Math.min(e.vy + GRAVITY_FALL * dt, MAX_FALL);
+      moveEntity(e, 0, e.vy * dt);
+      e.onGround = probeGround(e);
+    }
+    return;
+  }
+
   if (e.kind === "rusher") {
     // Does not wait to be provoked: the moment it is on screen it commits,
     // which is what makes it read as "incoming from the right".
@@ -4703,12 +4915,27 @@ function update(dt) {
   // Hitstop: freeze the world for a few frames so a kill lands.
   if (hitFreeze > 0) { hitFreeze -= dt; flash = Math.max(0, flash - dt); return; }
 
+  // The dash puts the body on rails: while it runs, acceleration, friction,
+  // gravity and the crouch are all suspended, and every other system -- enemy
+  // ticks, hazards, pickups -- keeps running exactly as before.
+  ninja.dashCd = Math.max(0, ninja.dashCd - dt);
+  if (ninja.onGround) ninja.airDashes = 0;
+  const dashing = ninja.dashT > 0;
+  if (dashing) {
+    ninja.dashT = Math.max(0, ninja.dashT - dt);
+    ninja.ghostT -= dt;
+    if (ninja.ghostT <= 0) { pushGhost(); ninja.ghostT = GHOST_GAP; }
+  }
+  updateGhosts(dt);
+
   const dir = (keys.has("ArrowRight") ? 1 : 0) - (keys.has("ArrowLeft") ? 1 : 0);
-  if (dir !== 0) ninja.facing = dir;
-  setCrouch(keys.has("ArrowDown") && ninja.onGround);
+  if (dir !== 0 && !dashing) ninja.facing = dir;
+  setCrouch(!dashing && keys.has("ArrowDown") && ninja.onGround);
   const topSpeed = ninja.crouch ? CROUCH_SPEED : MOVE_SPEED;
 
-  if (dir !== 0) {
+  if (dashing) {
+    ninja.vx = ninja.dashDir * DASH_SPEED;
+  } else if (dir !== 0) {
     const turning = ninja.vx !== 0 && Math.sign(ninja.vx) !== dir;
     let a = ninja.onGround ? ACCEL_GROUND : ACCEL_AIR;
     if (turning) a *= TURN_BOOST;
@@ -4721,22 +4948,36 @@ function update(dt) {
     if (Math.abs(ninja.vx) <= f) ninja.vx = 0;
     else ninja.vx -= Math.sign(ninja.vx) * f;
   }
-  if (Math.abs(ninja.vx) > topSpeed) ninja.vx = Math.sign(ninja.vx) * topSpeed;
+  // The dash's own speed is above the walking cap, so the cap is not applied
+  // to it -- clamping here is what would turn the dash back into a walk.
+  if (!dashing && Math.abs(ninja.vx) > topSpeed) ninja.vx = Math.sign(ninja.vx) * topSpeed;
 
   ninja.coyote = ninja.onGround ? COYOTE_TIME : Math.max(0, ninja.coyote - dt);
   ninja.buffer = Math.max(0, ninja.buffer - dt);
   if (ninja.buffer > 0 && ninja.coyote > 0 && !ninja.crouch) {
     ninja.vy = -JUMP_VEL; ninja.buffer = 0; ninja.coyote = 0; ninja.onGround = false;
+    // A jump CANCELS a dash rather than being swallowed by it, and it keeps the
+    // dash's horizontal speed for that frame -- the dash-jump is the reward for
+    // chaining them, and the thing that makes the pair worth learning.
+    ninja.dashT = 0;
   }
 
-  const g = ninja.vy < 0 ? GRAVITY_RISE : GRAVITY_FALL;
-  ninja.vy = Math.min(ninja.vy + g * dt, MAX_FALL);
+  // Gravity off for the duration: a dash that arcs is a jump, and the flat
+  // line is the whole read.
+  const g = ninja.dashT > 0 ? 0 : ninja.vy < 0 ? GRAVITY_RISE : GRAVITY_FALL;
+  if (ninja.dashT > 0) ninja.vy = 0;
+  else ninja.vy = Math.min(ninja.vy + g * dt, MAX_FALL);
 
   const wasAirborne = !ninja.onGround;
   const impactVy = ninja.vy;
   const beforeX = ninja.x;
   moveEntity(ninja, ninja.vx * dt, ninja.vy * dt);
   ninja.onGround = probeGround(ninja);
+  // A dash into a wall ends there rather than grinding against it for the rest
+  // of its duration, which both looks stuck and eats the cooldown for nothing.
+  if (ninja.dashT > 0 && Math.abs(ninja.x - beforeX) < Math.abs(ninja.vx) * dt * 0.4) {
+    ninja.dashT = 0;
+  }
   // Ground actually covered this frame drives the walk cycle.
   trackWalk(ninja, (ninja.x - beforeX) * (ninja.facing < 0 ? -1 : 1), dt);
   // The screen's left edge is a wall: the camera never rewinds, so the ninja
@@ -4913,6 +5154,30 @@ function drawPixels(rows, sx, sy, flip, palette, cell) {
   }
 }
 
+/* A pose as one flat colour, drawn as horizontal RUNS instead of per pixel.
+   drawPixels emits a fillRect per opaque cell because each cell can be a
+   different colour; a silhouette cannot, so consecutive cells coalesce and a
+   32x48 stamp costs about forty rects instead of eight hundred. That is what
+   makes dash trails and impact frames cheap enough to leave on. */
+function drawSilhouette(rows, sx, sy, flip, color, cell) {
+  const cols = rows[0].length;
+  ctx.fillStyle = color;
+  for (let r = 0; r < rows.length; r++) {
+    const row = rows[r];
+    let run = 0;
+    for (let c = 0; c <= cols; c++) {
+      if (c < cols && row[c] !== ".") { run++; continue; }
+      if (!run) continue;
+      const c0 = c - run;
+      // Mirrored by column index, exactly as drawPixels does it, so a flipped
+      // stamp lands on the same pixels as the flipped sprite.
+      const px = flip ? sx + (cols - c) * cell : sx + c0 * cell;
+      ctx.fillRect(px, sy + r * cell, run * cell, cell);
+      run = 0;
+    }
+  }
+}
+
 function drawText(str, x, y, color, scale) {
   const sc = scale || 2;
   ctx.fillStyle = color;
@@ -4977,6 +5242,16 @@ function enemyGait(e) {
 
 // The LOCAL pose name; drawEntities() looks it up under the enemy's own kind.
 function enemyPoseOf(e) {
+  /* A sentry's poses come first: while `ledge` holds, the body is running the
+     perch machine and its per-kind states are not valid to read. */
+  if (e.ledge) {
+    if (e.state === "perchWind" || e.state === "perchLand") return "coil";
+    if (e.state === "dive") {
+      // Whatever each kind already has that reads as "committed and airborne".
+      return e.kind === "rusher" ? "leap" : e.kind === "charger" ? "lunge" : "sweep";
+    }
+    return "base";
+  }
   if (e.kind === "rusher") {
     // The wall entrance has poses of its own: hands on the coping while it
     // watches, one leg across while it comes over. Guarded by a lookup rather
@@ -5403,16 +5678,296 @@ function drawShurikenIcon(sx, sy, size, spin) {
   ctx.fillRect(sx + h - 1, sy + h - 1, 2, 2);
 }
 
+/* --- ENEMY WEAPON MOTION -------------------------------------------------- */
+/* Every enemy attack already had a hitbox, a pose and a yellow tick over the
+   head. None of that is a swing. The box is invisible, the pose is a single
+   frame that does not move, and the tick says "something is coming" without
+   saying WHAT or WHERE -- so getting hit read as having walked into a body,
+   which is exactly the complaint.
+
+   These are the same travelling half-annulus sweeps the player's blade uses,
+   with one rule: the geometry is derived from the SAME constants as the hazard
+   box, so the picture cannot drift away from the thing that actually kills you.
+   A windup raises the steel and paints a dim preview of the ground the box will
+   cover; the swing then sweeps that exact ground bright.
+
+   The player's own arc is left alone deliberately. It is tuned to a 46px box on
+   a 32px sprite and commented to match; sharing one function would have meant
+   re-tuning it to serve four callers. */
+
+// One travelling band along an ellipse. `p` is sweep progress 0..1, `span` the
+// angle covered, `start` where it begins. dir mirrors it for a left-facing body.
+function sweepArc(cx, cy, dir, p, rx, ry, thick, start, span, cols, alpha) {
+  const steps = Math.max(18, Math.round(span * Math.max(rx, ry)));
+  const leadTh = start + p * span;
+  for (let i = 0; i <= steps; i++) {
+    const th = start + (i / steps) * span;
+    if (th > leadTh) break;                   // not swept through yet
+    const behind = span > 0 ? (leadTh - th) / span : 0;
+    const t2 = Math.max(2, thick * (1 - behind * 0.5));
+    const mr = 1 - (t2 / 2) / rx, my = 1 - (t2 / 2) / ry;
+    const px = cx + dir * rx * mr * Math.cos(th);
+    const py = cy + ry * my * Math.sin(th);
+    // Capped: an uncapped leading cell grows with `thick` and lands as one
+    // fat square pasted on the end of the arc, which reads as a blob rather
+    // than as a tip.
+    const sz = Math.max(2, Math.min(7, Math.round(t2)));
+    ctx.fillStyle = behind < 0.09 ? cols[0] : behind < 0.32 ? cols[1] : cols[2];
+    ctx.globalAlpha = alpha === undefined ? 1 : alpha;
+    ctx.fillRect(Math.round(px - sz / 2), Math.round(py - sz / 2), sz, sz);
+  }
+  ctx.globalAlpha = 1;
+}
+
+/* A straight thrust: the point, then a trail tapering back to the hand. Drawn
+   from the HAND outward rather than from the sprite's edge -- started at the
+   edge it left a gap the width of the shoulder and read as a detached object
+   floating beside the body. */
+function thrustStreak(x, y, dir, len, thick, cols) {
+  for (let i = 0; i < len; i += 2) {
+    const k = 1 - i / len;                    // 1 at the point, 0 at the hand
+    const t2 = Math.max(1, Math.round(thick * (0.35 + k * 0.65)));
+    ctx.fillStyle = k > 0.82 ? cols[0] : k > 0.5 ? cols[1] : cols[2];
+    ctx.fillRect(Math.round(x + dir * i - (dir < 0 ? 2 : 0)),
+                 Math.round(y - t2 / 2), 2, t2);
+  }
+  // The point itself, one bright cell wider than the shaft.
+  ctx.fillStyle = cols[0];
+  ctx.fillRect(Math.round(x + dir * len - (dir < 0 ? 3 : 0)), Math.round(y - 2), 3, 4);
+}
+
+/* THE TELEGRAPH IS THE BOX, NOT THE ARC.
+   The first version previewed the swing by drawing its whole 180-degree band at
+   low alpha. A thin band over a full half-turn closes visually into a ring, and
+   what it read as was a lasso being spun -- not "this ground is about to be
+   lethal". So the preview is now the hazard rectangle itself: corner ticks and
+   a faint fill, brightening as the windup runs out. It is the literal footprint
+   of the box the enemy is about to push, which is the one thing worth knowing.
+
+   `w` is windup progress 0..1, so the player reads urgency off the brightness
+   and the position off the rectangle. */
+function hazardPreview(x, y, w, h, prog, col) {
+  /* HATCHED, not filled. A solid tint over a 68x40 box is a grey slab that
+     hides the alley behind it -- and the alley is where the player is looking
+     for a way out. Scan lines every four pixels mark the same ground while
+     leaving three quarters of it visible, and they read as hazard tape rather
+     than as fog. */
+  ctx.fillStyle = "rgba(" + col + "," + (0.10 + prog * 0.22).toFixed(3) + ")";
+  for (let yy = 1; yy < h; yy += 4) {
+    ctx.fillRect(Math.round(x), Math.round(y + yy), Math.round(w), 1);
+  }
+  const tick = Math.max(3, Math.round(Math.min(w, h) * 0.22));
+  ctx.fillStyle = "rgba(" + col + "," + (0.35 + prog * 0.5).toFixed(3) + ")";
+  const x0 = Math.round(x), y0 = Math.round(y);
+  const x1 = Math.round(x + w), y1 = Math.round(y + h);
+  ctx.fillRect(x0, y0, tick, 1);            ctx.fillRect(x0, y0, 1, tick);
+  ctx.fillRect(x1 - tick, y0, tick, 1);     ctx.fillRect(x1 - 1, y0, 1, tick);
+  ctx.fillRect(x0, y1 - 1, tick, 1);        ctx.fillRect(x0, y1 - tick, 1, tick);
+  ctx.fillRect(x1 - tick, y1 - 1, tick, 1); ctx.fillRect(x1 - 1, y1 - tick, 1, tick);
+}
+
+const CHG_STEEL = ["#FFF4D8", "#FFD489", "rgba(226,150,74,0.60)"];
+const WARD_STEEL = ["#EAFBFF", "#9FE4F0", "rgba(120,196,214,0.58)"];
+const RUSH_STEEL = ["#FFFFFF", "#E7C8FF", "rgba(178,132,226,0.60)"];
+
+/* The raised weapon of a windup. Drawn as a short bar leaving the shoulder at
+   the angle the sweep will START from, so the telegraph and the swing are
+   visibly the same motion held still. It also GROWS over the windup, which is
+   the part that reads as "being wound up" rather than "holding a pose". */
+function windupSteel(cx, cy, dir, w, rx, ry, start, cols) {
+  /* Pivoted at the HAND, not at the body's centre line, and cocked BACK over
+     the shoulder rather than standing straight up. Both corrections come from
+     the same mistake: drawn from the centre at the sweep's start angle, the bar
+     was a couple of pixels of steel buried inside the torso -- present in the
+     draw call and invisible on screen.
+
+     It also lengthens over the windup, so the blade is still being raised while
+     the bar over the head is still filling. */
+  const hx = cx + dir * 5;
+  const len = Math.round(13 + w * 15);
+  const ang = start - dir * 0.42 * dir;      // tipped away from the swing
+  const cs = Math.cos(ang), sn = Math.sin(ang) * (ry / rx);
+  for (let i = 3; i < len; i += 2) {
+    const k = i / len;
+    ctx.fillStyle = k > 0.68 ? cols[0] : cols[1];
+    ctx.fillRect(Math.round(hx - dir * cs * i * 0.55), Math.round(cy + sn * i), 3, 3);
+  }
+  // The tip catches the light, which is what makes it read as a raised edge.
+  ctx.fillStyle = cols[0];
+  ctx.fillRect(Math.round(hx - dir * cs * len * 0.55) - 1,
+               Math.round(cy + sn * len) - 1, 4, 4);
+}
+
+/* WHERE A DIVE LANDS.
+   Three wrong answers were tried before this one. groundTopRow() scans from the
+   top and returns the ledge the sentry is standing on. Scanning down from the
+   feet returns the same ledge, because the feet sit on its top row -- which
+   made the drop shaft 8px tall and put the landing pad under the sentry's own
+   boots, i.e. exactly where it already was.
+
+   The column matters too. A dive pushes off sideways (PERCH_DIVE_VX), so it
+   comes down BESIDE the structure, not through it -- the column to check is the
+   one it drifts into. Solid rows are then skipped before the search starts, so
+   a wide platform does not report its own surface as the floor. */
+function diveTargetOf(e) {
+  const cx = e.x + e.w / 2 + (e.diveDir || -1) * 16;
+  const tx = Math.max(0, Math.min(COLS - 1, Math.floor(cx / TILE)));
+  let r = Math.floor((e.y + e.h) / TILE);
+  while (r < ROWS && solidAt(tx, r)) r++;       // through whatever it stands on
+  for (; r < ROWS; r++) if (solidAt(tx, r)) return { cx: cx, row: r };
+  return { cx: cx, row: -1 };
+}
+
+function drawEnemyWeapon(e) {
+  const dir = e.facing > 0 ? 1 : -1;
+  const feet = e.y + e.h;
+  const cx = Math.round(e.x + e.w / 2 - cam.x);
+  const UP = -Math.PI / 2;
+
+  /* THE DROP.
+     A sentry's warning has to be legible from the FLOOR, because that is where
+     the player's eyes are -- a tell drawn up on the roofline is a tell nobody
+     sees. So the crouch paints the shaft of air it is about to fall through and
+     puts a bright pad on the ground it will land on, and both brighten as the
+     crouch runs out. The dive then draws the weapon leading the body down. */
+  if (e.ledge) {
+    const cols = e.kind === "charger" ? CHG_STEEL
+               : e.kind === "warden" ? WARD_STEEL : RUSH_STEEL;
+    if (e.state === "perchWind") {
+      const w = 1 - Math.max(0, e.timer) / PERCH_WIND;
+      /* Drawn over the LANDING column, not over the sentry's own. Drawn over
+         its own, the shaft for a body standing on a 32px cover block lay
+         entirely inside that block -- 32 pixels of hatching on top of 32 pixels
+         of brick, invisible, while the pad sat under its boots. The drop drifts
+         sideways, so the warning belongs where the drop ends. */
+      const tgt = diveTargetOf(e);
+      const gy = tgt.row < 0 ? WORLD_H : tgt.row * TILE;
+      hazardPreview(tgt.cx - e.w / 2 - cam.x, feet - cam.y, e.w,
+                    Math.max(8, gy - feet), w, "255,150,120");
+      ctx.fillStyle = "rgba(255,160,120," + (0.30 + w * 0.5).toFixed(3) + ")";
+      ctx.fillRect(Math.round(tgt.cx - e.w / 2 - 5 - cam.x),
+                   Math.round(gy - 2 - cam.y), e.w + 10, 2);
+      // The coiled weapon, held low and across the body.
+      windupSteel(cx, Math.round(feet - 18 - cam.y), dir, w, 18, 14, -0.5, cols);
+    } else if (e.state === "dive") {
+      const bx = Math.round(e.x + e.w / 2 - cam.x), by = Math.round(feet - cam.y);
+      /* The weapon leads the body DOWN, and it has to be long enough to read
+         against a 44px sprite -- a short stub under the feet looks like part of
+         the boot rather than like steel. */
+      for (let i = 0; i < 26; i += 2) {
+        const k = 1 - i / 26;                   // 1 at the point, 0 at the body
+        const t2 = Math.max(2, Math.round(9 * (0.25 + k * 0.75)));
+        ctx.fillStyle = k > 0.78 ? cols[0] : k > 0.46 ? cols[1] : cols[2];
+        ctx.fillRect(bx - (t2 >> 1) + dir * 3, by + i - 14, t2, 2);
+      }
+      ctx.fillStyle = cols[0];                  // the point
+      ctx.fillRect(bx - 2 + dir * 3, by + 12, 5, 4);
+      // Speed lines trailing UP out of the frame: the read is "this came from
+      // above", and a falling body with nothing behind it reads as a jump.
+      ctx.fillStyle = "rgba(214,228,255,0.30)";
+      for (let i = 0; i < 3; i++) {
+        ctx.fillRect(bx - 9 + i * 9, Math.round(e.y - cam.y) - 22 - i * 5, 2, 12);
+      }
+    }
+    return;
+  }
+
+  if (e.kind === "charger") {
+    // Heavy overhead: the widest arc in the game, matching a 32px box that
+    // reaches from 42px up to 6px above the feet.
+    const cy = Math.round(feet - CHG_HIT_TOP + 10 - cam.y);
+    const rx = e.w / 2 + CHG_HIT_W - 2, ry = (CHG_HIT_TOP - CHG_HIT_BOT) / 2 + 8;
+    if (e.state === "windup") {
+      const w = 1 - Math.max(0, e.timer) / CHG_WINDUP;
+      windupSteel(cx, cy, dir, w, rx, ry, UP, CHG_STEEL);
+      hazardPreview(dir > 0 ? e.x + e.w - cam.x : e.x - CHG_HIT_W - cam.x,
+                    feet - CHG_HIT_TOP - cam.y, CHG_HIT_W,
+                    CHG_HIT_TOP - CHG_HIT_BOT, w, "255,196,110");
+    } else if (e.state === "swing") {
+      sweepArc(cx, cy, dir, 1 - Math.max(0, e.timer) / CHG_SWING,
+               rx, ry, 9, UP, Math.PI, CHG_STEEL);
+    } else if (e.state === "lungeWind") {
+      const w = 1 - Math.max(0, e.timer) / CHG_LUNGE_WIND;
+      windupSteel(cx, Math.round(feet - LUNGE_HIT_TOP + 8 - cam.y), dir, w, 20, 16,
+                  0.25, CHG_STEEL);
+      // The lunge covers ground, so the preview is the whole corridor it crosses.
+      hazardPreview(dir > 0 ? e.x + e.w - cam.x : e.x - CHG_LUNGE_DIST - cam.x,
+                    feet - LUNGE_HIT_TOP - cam.y, CHG_LUNGE_DIST,
+                    LUNGE_HIT_TOP - LUNGE_HIT_BOT, w, "255,150,90");
+    } else if (e.state === "lunge") {
+      thrustStreak(e.x + (dir > 0 ? e.w - 6 : 6) - cam.x,
+                   feet - LUNGE_HIT_TOP + 12 - cam.y, dir,
+                   LUNGE_HIT_W + 16, 7, CHG_STEEL);
+    }
+    return;
+  }
+
+  if (e.kind === "warden") {
+    // A low polearm sweep, so it comes in UNDER a jump instead of over a crouch.
+    const cy = Math.round(feet - WARD_SWEEP_TOP / 2 - 2 - cam.y);
+    const rx = e.w / 2 + WARD_SWEEP_REACH - 6, ry = 20;
+    if (e.state === "sweepWind") {
+      const w = 1 - Math.max(0, e.timer) / WARD_SWEEP_WIND;
+      windupSteel(cx, cy, dir, w, rx, ry, -1.15, WARD_STEEL);
+      hazardPreview(dir > 0 ? e.x + e.w - cam.x : e.x - WARD_SWEEP_REACH - cam.x,
+                    feet - WARD_SWEEP_TOP - cam.y, WARD_SWEEP_REACH,
+                    WARD_SWEEP_TOP - WARD_SWEEP_BOT, w, "150,228,244");
+    } else if (e.state === "sweep") {
+      sweepArc(cx, cy, dir, 1 - Math.max(0, e.timer) / WARD_SWEEP_TIME,
+               rx, ry, 8, -1.15, 1.9, WARD_STEEL);
+    } else if (e.state === "aim") {
+      /* The polearm comes LEVEL as it aims, along the exact line the shot will
+         travel, and a sight line runs ahead of it. That line is why the warden
+         was unreadable: the bullet's height was a constant nobody could see, so
+         "crouch or die" arrived with no notice. */
+      const ay = Math.round(feet - BULLET_Y_OFF - cam.y);
+      const w = 1 - Math.max(0, e.timer) / WARD_AIM;
+      thrustStreak(cx + dir * 4, ay, dir, 12 + Math.round(w * 14), 4, WARD_STEEL);
+      ctx.fillStyle = "rgba(180,230,255," + (0.10 + w * 0.26).toFixed(3) + ")";
+      for (let i = 26; i < WARD_RANGE; i += 8) {
+        ctx.fillRect(Math.round(cx + dir * i), ay, 4, 1);
+      }
+    }
+    return;
+  }
+
+  // Rusher: a kunai held out on the leap, thrust on the lunge.
+  if (e.state === "leap") {
+    thrustStreak(e.x + (dir > 0 ? e.w - 6 : 6) - cam.x,
+                 feet - LEAP_HIT_TOP + 8 - cam.y, dir, LEAP_HIT_W + 14, 5, RUSH_STEEL);
+  } else if (e.state === "lunge" || e.state === "lungeWind") {
+    thrustStreak(e.x + (dir > 0 ? e.w - 6 : 6) - cam.x,
+                 feet - LUNGE_HIT_TOP + 10 - cam.y, dir,
+                 LUNGE_HIT_W + 16, 6, RUSH_STEEL);
+  }
+}
+
+/* OFF-SCREEN BODIES ARE NOT DRAWN.
+   update() has culled enemies to ACTIVE_MARGIN since the AI was written; this
+   function never did, and nobody measured it. The stage holds 56 enemies and
+   about two are on screen, so every frame painted fifty-four characters into
+   the void a pixel at a time: 44,685 of the frame's 52,229 fillRect calls, 86%
+   of the entire draw, for nothing.
+
+   The margin is wider than the sprite so a body sliding in at the edge is
+   already drawn before any part of it should be visible, and it is checked
+   against the SPRITE box rather than the collision box -- the art is wider than
+   the body and would otherwise pop in.                                       */
+const DRAW_MARGIN = SPRITE_W + 16;
+function onScreen(o) {
+  return o.x + (o.w || 0) > cam.x - DRAW_MARGIN && o.x < cam.x + VIEW_W + DRAW_MARGIN;
+}
+
 function drawEntities() {
   for (const p of pickups) {
-    if (p.taken) continue;
+    if (p.taken || !onScreen(p)) continue;
     const bob = Math.round(Math.sin(clock * 3.3 + p.x) * 2);
     drawShurikenIcon(Math.round(p.x - cam.x), Math.round(p.y - cam.y) + bob, 10,
                      Math.floor(clock * 8) % 2 === 0);
   }
 
   for (const f of flags) {
-    if (f.taken) continue;
+    if (f.taken || !onScreen(f)) continue;
     // The banner ripples by shifting a pixel, so it never detaches from the pole.
     const wave = Math.floor(clock * 5) % 2;
     drawPixels(FLAG_SPRITE, Math.round(f.x - cam.x),
@@ -5420,7 +5975,7 @@ function drawEntities() {
   }
 
   for (const e of enemies) {
-    if (!e.alive) continue;
+    if (!e.alive || !onScreen(e)) continue;
     const pal = e.kind === "charger" ? P_CHARGER
               : e.kind === "rusher"  ? P_RUSHER : P_WARDEN;
     const poseName = enemyPoseOf(e);
@@ -5444,10 +5999,29 @@ function drawEntities() {
       continue;
     }
     drawPose(rows, e.kind + "/" + poseName, sx, sy, e.facing === -1, pal, CELL_NINJA);
-    // Telegraph: a tick above the head while committing to an attack.
-    if (e.state === "windup" || e.state === "aim" || e.state === "leap") {
-      ctx.fillStyle = "#FFE45E";
-      ctx.fillRect(Math.round(e.x - cam.x) + 8, sy - 7, 6, 4);
+    /* The weapon goes on TOP of the body, so the steel is never buried under
+       the shoulder it swings from. */
+    drawEnemyWeapon(e);
+    /* Telegraph. The tick that was here was four pixels of flat yellow; it said
+       "committing" and nothing else. It now PULSES over the windup -- widening
+       and brightening as the attack gets closer -- so the bar itself counts down
+       the time you have, and it is drawn for every committed state rather than
+       the three that happened to be listed. */
+    const WIND = { windup: CHG_WINDUP, lungeWind: CHG_LUNGE_WIND,
+                   sweepWind: WARD_SWEEP_WIND, aim: WARD_AIM,
+                   // The sentry's crouch is a windup like any other, and it was
+                   // the one committed state with no bar over the head.
+                   perchWind: PERCH_WIND };
+    const full = WIND[e.state];
+    if (full !== undefined) {
+      const w = Math.max(0, Math.min(1, 1 - Math.max(0, e.timer) / full));
+      const bw = 4 + Math.round(w * 8);
+      ctx.fillStyle = w > 0.75 ? "#FFFFFF" : w > 0.45 ? "#FFE45E" : "#C8922F";
+      ctx.fillRect(Math.round(e.x + e.w / 2 - cam.x) - (bw >> 1), sy - 8, bw, 3);
+    } else if (e.state === "leap" || e.state === "lunge" || e.state === "swing" ||
+               e.state === "sweep" || e.state === "burst") {
+      ctx.fillStyle = "#FF8A5A";                  // committed: no longer a warning
+      ctx.fillRect(Math.round(e.x + e.w / 2 - cam.x) - 6, sy - 8, 12, 3);
     }
   }
 
@@ -5455,6 +6029,7 @@ function drawEntities() {
   // a gun. The crescent is drawn a couple of pixels beyond the hitbox so it
   // reads at 32px; the box itself is unchanged, so the crouch timing is too.
   for (const b of bullets) {
+    if (!onScreen(b)) continue;
     const bx = Math.round(b.x - cam.x), by = Math.round(b.y - cam.y);
     ctx.fillStyle = "#8FB6F2";
     ctx.fillRect(bx + 1, by - 3, b.w - 1, 2);
@@ -5878,6 +6453,7 @@ function render() {
   drawGoal();
   drawProps();
   drawEntities();
+  drawGhosts();     // under the body: a trail in front of it reads as a smear
   drawNinja();      // drawn during "dying" too: the freeze frame IS the effect
   drawVaultMarkers();
   drawLowAmmoWarning();

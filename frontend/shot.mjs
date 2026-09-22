@@ -1,12 +1,25 @@
-// Replays the game's fillRect calls into an RGB buffer and writes a real PNG,
-// so the sprites can actually be looked at without a browser.
+// Replays the game's draw calls into an RGBA buffer and writes a real PNG, so
+// the sprites can actually be looked at without a browser.
+//
+// This started as a fillRect recorder. It is now a small rasteriser, because
+// the art moved out of the pixel arrays and into an atlas: a recorder that
+// only understands fillRect goes blind the moment a sprite becomes a blit, and
+// on this box it is the only pair of eyes there is. It therefore supports
+//   fillRect, drawImage (3/5/9-arg), save/restore, translate/scale,
+//   globalAlpha, and globalCompositeOperation = "lighter"
+// which between them cover every drawing primitive the game uses. Assets are
+// served off disk through a fake fetch/Image so a shot shows what a browser
+// would show, atlas and all.
 import fs from "node:fs";
+import path from "node:path";
 import zlib from "node:zlib";
 import vm from "node:vm";
 import { fileURLToPath } from "node:url";
 
 // Resolved against this script, not the cwd, so the shots render from anywhere.
 const FILE = fileURLToPath(new URL("index.html", import.meta.url));
+const ASSET_DIR = fileURLToPath(new URL("assets/", import.meta.url));
+
 const src = fs.readFileSync(FILE, "utf8").match(/<script>([\s\S]*?)<\/script>/)[1] + `
 globalThis.__t = { ninja, cam, render, update, updateCamera, snapCamera, spawn,
   TILE, BODY_H, VIEW_W, VIEW_H, STEP, keys, restart, poseNameOf, walkFrame,
@@ -23,25 +36,177 @@ globalThis.__t = { ninja, cam, render, update, updateCamera, snapCamera, spawn,
   slash, drawEntities, drawNinja, SLASH_HIT, SLASH_WIND, vaultSites,
   update, STEP, MOVE_SPEED, WALL_TOP, vaultAirborne,
   set wakeT(v) { wakeT = v; },
-  get slashes() { return slashes; } };`;
+  get slashes() { return slashes; }, loadAssets,
+  startDash, drawEnemyWeapon, drawGhosts, get ghosts() { return ghosts; },
+  DASH_TIME, CHG_WINDUP, CHG_SWING, CHG_LUNGE_WIND, WARD_SWEEP_WIND,
+  WARD_SWEEP_TIME, WARD_AIM, ENEMY_H, ENEMY_W, ROWS,
+  PERCH_WIND, PERCH_LAND, PERCH_SCAN, enemyPoseOf, solidAt, COLS, CAM_Y,
+  ENEMY_WAKE, get hazards() { return hazards; } };`;
 
+/* --- PNG decode ----------------------------------------------------------- */
+/* Enough of the spec for what our own pipeline emits and for anything a normal
+   exporter produces: 8-bit greyscale, RGB, palette and RGBA, all five filter
+   types. Interlaced and 16-bit files are rejected loudly rather than silently
+   producing garbage -- a silently wrong atlas is worse than no atlas. */
+function decodePNG(buf) {
+  if (buf.readUInt32BE(0) !== 0x89504E47) throw new Error("not a PNG");
+  let p = 8, W = 0, H = 0, depth = 8, ctype = 6, inter = 0;
+  const idat = [];
+  let plte = null, trns = null;
+  while (p + 8 <= buf.length) {
+    const len = buf.readUInt32BE(p);
+    const type = buf.toString("ascii", p + 4, p + 8);
+    const data = buf.subarray(p + 8, p + 8 + len);
+    if (type === "IHDR") {
+      W = data.readUInt32BE(0); H = data.readUInt32BE(4);
+      depth = data[8]; ctype = data[9]; inter = data[12];
+    } else if (type === "IDAT") idat.push(data);
+    else if (type === "PLTE") plte = data;
+    else if (type === "tRNS") trns = data;
+    else if (type === "IEND") break;
+    p += 12 + len;
+  }
+  if (depth !== 8) throw new Error("PNG bit depth " + depth + " unsupported");
+  if (inter) throw new Error("interlaced PNG unsupported");
+  const CH = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }[ctype];
+  if (!CH) throw new Error("PNG colour type " + ctype + " unsupported");
+
+  const raw = zlib.inflateSync(Buffer.concat(idat));
+  const stride = W * CH;
+  const lines = Buffer.alloc(H * stride);
+  let rp = 0;
+  for (let y = 0; y < H; y++) {
+    const f = raw[rp++];
+    const cur = lines.subarray(y * stride, y * stride + stride);
+    raw.copy(cur, 0, rp, rp + stride);
+    rp += stride;
+    const prev = y > 0 ? lines.subarray((y - 1) * stride, y * stride) : null;
+    for (let i = 0; i < stride; i++) {
+      const a = i >= CH ? cur[i - CH] : 0;
+      const b = prev ? prev[i] : 0;
+      const c = prev && i >= CH ? prev[i - CH] : 0;
+      if (f === 1) cur[i] = (cur[i] + a) & 0xFF;
+      else if (f === 2) cur[i] = (cur[i] + b) & 0xFF;
+      else if (f === 3) cur[i] = (cur[i] + ((a + b) >> 1)) & 0xFF;
+      else if (f === 4) {
+        const q = a + b - c;
+        const pa = Math.abs(q - a), pb = Math.abs(q - b), pc = Math.abs(q - c);
+        cur[i] = (cur[i] + (pa <= pb && pa <= pc ? a : pb <= pc ? b : c)) & 0xFF;
+      }
+    }
+  }
+
+  // Everything becomes RGBA, so the rasteriser has exactly one layout to read.
+  const out = new Uint8Array(W * H * 4);
+  for (let i = 0, n = W * H; i < n; i++) {
+    const s = i * CH, d = i * 4;
+    if (ctype === 6) { out[d] = lines[s]; out[d+1] = lines[s+1]; out[d+2] = lines[s+2]; out[d+3] = lines[s+3]; }
+    else if (ctype === 2) { out[d] = lines[s]; out[d+1] = lines[s+1]; out[d+2] = lines[s+2]; out[d+3] = 255; }
+    else if (ctype === 0) { out[d] = out[d+1] = out[d+2] = lines[s]; out[d+3] = 255; }
+    else if (ctype === 4) { out[d] = out[d+1] = out[d+2] = lines[s]; out[d+3] = lines[s+1]; }
+    else {                                     // palette
+      const k = lines[s] * 3;
+      out[d] = plte ? plte[k] : 0; out[d+1] = plte ? plte[k+1] : 0; out[d+2] = plte ? plte[k+2] : 0;
+      out[d+3] = trns && lines[s] < trns.length ? trns[lines[s]] : 255;
+    }
+  }
+  return { width: W, height: H, data: out };
+}
+
+/* --- the recording context ------------------------------------------------ */
+/* Ops are kept in call order and composited in that order, because a blit over
+   a rect and a rect over a blit are different pictures. The transform is
+   flattened at record time: the only transforms the game uses are the
+   translate+scale(-1,1) pair that mirrors a sprite, so a full matrix would be
+   machinery for a case that never arrives. A negative width is the mirror, and
+   the rasteriser normalises it. */
 const rects = [];
+let xf = { tx: 0, ty: 0, sx: 1, sy: 1 };
+const xfStack = [];
+
 const ctx = {
   fillStyle: "#000", font: "", textBaseline: "", imageSmoothingEnabled: true,
-  fillRect(x, y, w, h) { rects.push({ x, y, w, h, c: this.fillStyle }); },
-  fillText() {}
+  globalAlpha: 1, globalCompositeOperation: "source-over",
+  fillRect(x, y, w, h) {
+    rects.push({ blit: null, x: xf.tx + x * xf.sx, y: xf.ty + y * xf.sy,
+                 w: w * xf.sx, h: h * xf.sy, c: this.fillStyle,
+                 ga: this.globalAlpha, add: this.globalCompositeOperation === "lighter" });
+  },
+  fillText() {},
+  save() { xfStack.push({ tx: xf.tx, ty: xf.ty, sx: xf.sx, sy: xf.sy }); },
+  restore() { if (xfStack.length) xf = xfStack.pop(); },
+  translate(x, y) { xf.tx += x * xf.sx; xf.ty += y * xf.sy; },
+  scale(x, y) { xf.sx *= x; xf.sy *= y; },
+  drawImage(img, a, b, c, d, e, f, g, h) {
+    let sx = 0, sy = 0, sw = img.width, sh = img.height, dx, dy, dw, dh;
+    if (e === undefined) { dx = a; dy = b; dw = c === undefined ? sw : c; dh = d === undefined ? sh : d; }
+    else { sx = a; sy = b; sw = c; sh = d; dx = e; dy = f; dw = g === undefined ? sw : g; dh = h === undefined ? sh : h; }
+    rects.push({ blit: img, sx, sy, sw, sh,
+                 x: xf.tx + dx * xf.sx, y: xf.ty + dy * xf.sy,
+                 w: dw * xf.sx, h: dh * xf.sy,
+                 ga: this.globalAlpha, add: this.globalCompositeOperation === "lighter" });
+  }
 };
+
+/* --- asset plumbing ------------------------------------------------------- */
+/* The game loads assets over fetch and Image. Both are real here, backed by
+   the assets folder on disk, so a shot proves the atlas path rather than only
+   the built-in fallback. A missing folder is the normal, valid state and leaves
+   the built-ins in place -- exactly as it does in a browser on file://. */
+let assetReads = 0;
+function assetPath(url) { return path.join(ASSET_DIR, String(url).replace(/^assets\//, "")); }
+
+class FakeImage {
+  constructor() { this.width = 0; this.height = 0; this.data = null; }
+  set src(v) {
+    this._src = v;
+    try {
+      const img = decodePNG(fs.readFileSync(assetPath(v)));
+      this.width = img.width; this.height = img.height; this.data = img.data;
+      assetReads++;
+      if (this.onload) this.onload();
+    } catch (err) {
+      if (this.onerror) this.onerror();
+    }
+  }
+  get src() { return this._src; }
+}
+
+async function fakeFetch(url) {
+  const f = assetPath(url);
+  if (!fs.existsSync(f)) return { ok: false, status: 404 };
+  const b = fs.readFileSync(f);
+  assetReads++;
+  return {
+    ok: true, status: 200,
+    async json() { return JSON.parse(b.toString("utf8")); },
+    async text() { return b.toString("utf8"); },
+    async arrayBuffer() { return b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength); }
+  };
+}
+
 const sandbox = {
   document: { getElementById: () => ({ getContext: () => ctx, style: {},
     getBoundingClientRect: () => ({ left: 0, top: 0, width: 640, height: 360 }),
     addEventListener() {} }) },
   addEventListener() {}, requestAnimationFrame() {},
-  performance: { now: () => 0 }, console
+  performance: { now: () => 0 }, console,
+  Image: FakeImage, fetch: fakeFetch,
+  Math, JSON, Date, Object, Array, String, Number, Boolean, Set, Map,
+  Uint8Array, Float32Array, Promise, isNaN, isFinite, parseInt, parseFloat
 };
 sandbox.globalThis = sandbox;
 vm.createContext(sandbox);
 vm.runInContext(src, sandbox, { filename: "game" });
 const t = sandbox.__t;
+
+// Assets are fired-and-forgotten in the browser; here the shots must wait for
+// them, or every picture is of the fallback.
+if (t.loadAssets) {
+  await t.loadAssets();
+  console.log(assetReads ? `assets: ${assetReads} file(s) read from assets/`
+                         : "assets: none (built-in art and synth)");
+}
 
 function parseColor(c) {
   if (c[0] === "#") {
@@ -60,20 +225,59 @@ function parseColor(c) {
 function raster(W, H, list) {
   const buf = new Uint8Array(W * H * 3);
   for (const r of list) {
-    const [cr, cg, cb, ca] = parseColor(r.c);
-    const x0 = Math.max(0, Math.round(r.x)), y0 = Math.max(0, Math.round(r.y));
-    const x1 = Math.min(W, Math.round(r.x + r.w)), y1 = Math.min(H, Math.round(r.y + r.h));
-    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
-      const i = (y * W + x) * 3;
-      if (ca >= 1) { buf[i] = cr; buf[i + 1] = cg; buf[i + 2] = cb; }
-      else {
-        buf[i]     = buf[i]     * (1 - ca) + cr * ca;
-        buf[i + 1] = buf[i + 1] * (1 - ca) + cg * ca;
-        buf[i + 2] = buf[i + 2] * (1 - ca) + cb * ca;
+    // A mirrored blit arrives with a negative width; normalise the rectangle
+    // and remember that the source has to be read backwards.
+    const flipX = r.w < 0, flipY = r.h < 0;
+    const rw = Math.abs(r.w), rh = Math.abs(r.h);
+    const rx = flipX ? r.x - rw : r.x, ry = flipY ? r.y - rh : r.y;
+    const x0 = Math.max(0, Math.round(rx)), y0 = Math.max(0, Math.round(ry));
+    const x1 = Math.min(W, Math.round(rx + rw)), y1 = Math.min(H, Math.round(ry + rh));
+    if (x1 <= x0 || y1 <= y0) continue;
+    const ga = r.ga === undefined ? 1 : r.ga;
+
+    if (!r.blit) {
+      const [cr, cg, cb, ca] = parseColor(r.c);
+      const al = ca * ga;
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+        const i = (y * W + x) * 3;
+        put(buf, i, cr, cg, cb, al, r.add);
+      }
+      continue;
+    }
+
+    const img = r.blit;
+    if (!img || !img.data) continue;
+    // Nearest neighbour, to match image-rendering: pixelated in the browser.
+    for (let y = y0; y < y1; y++) {
+      const v = (y - ry) / rh;
+      const syy = Math.min(img.height - 1,
+        (r.sy + (flipY ? 1 - v : v) * r.sh) | 0);
+      for (let x = x0; x < x1; x++) {
+        const u = (x - rx) / rw;
+        const sxx = Math.min(img.width - 1,
+          (r.sx + (flipX ? 1 - u : u) * r.sw) | 0);
+        const s = (syy * img.width + sxx) * 4;
+        const al = (img.data[s + 3] / 255) * ga;
+        if (al <= 0) continue;
+        put(buf, (y * W + x) * 3, img.data[s], img.data[s + 1], img.data[s + 2], al, r.add);
       }
     }
   }
   return buf;
+}
+
+function put(buf, i, cr, cg, cb, al, add) {
+  if (add) {
+    buf[i]     = Math.min(255, buf[i]     + cr * al);
+    buf[i + 1] = Math.min(255, buf[i + 1] + cg * al);
+    buf[i + 2] = Math.min(255, buf[i + 2] + cb * al);
+  } else if (al >= 1) {
+    buf[i] = cr; buf[i + 1] = cg; buf[i + 2] = cb;
+  } else {
+    buf[i]     = buf[i]     * (1 - al) + cr * al;
+    buf[i + 1] = buf[i + 1] * (1 - al) + cg * al;
+    buf[i + 2] = buf[i + 2] * (1 - al) + cb * al;
+  }
 }
 
 function scale(buf, W, H, k) {
@@ -266,3 +470,141 @@ shoot("shot-play.png", () => {
   writePNG("shot-arc.png", scale(raster(W, H, rects), W, H, k), W * k, H * k);
   console.log("wrote shot-arc.png  (the cut while walking)");
 }
+
+// --- 9. the dash, mid-flight with its trail -------------------------------
+// The trail is the whole point of the move on screen, and it only exists for
+// ten frames, so it needs a picture of its own or nobody ever looks at it.
+shoot("shot-dash.png", () => {
+  t.restart();
+  t.ninja.x = 27 * t.TILE; t.ninja.y = 20 * t.TILE - t.BODY_H;
+  t.ninja.onGround = true; t.ninja.facing = 1; t.ninja.invuln = 999;
+  t.snapCamera();
+  for (let i = 0; i < 4; i++) { t.ninja.invuln = 999; t.update(t.STEP); }
+  t.startDash();
+  // Seven of the ten frames in: enough trail behind the body to read as one.
+  for (let i = 0; i < 7; i++) { t.ninja.invuln = 999; t.update(t.STEP); }
+  t.playTime = 12; t.score = 900;
+  console.log(`   dash ghosts on screen: ${t.ghosts.length}`);
+});
+
+// --- 10. every enemy attack motion, held at its readable frame ------------
+// Each enemy's weapon used to be invisible: a hitbox, a one-frame pose and a
+// tick over the head. These are the swings that replaced that, held at the
+// frame where the steel is furthest from the body.
+{
+  const W = 600, H = 96, k = 3;
+  const cases = [
+    ["charger", "windup",    t.CHG_WINDUP * 0.15],
+    ["charger", "swing",     t.CHG_SWING * 0.35],
+    ["charger", "lunge",     0.1],
+    ["warden",  "sweepWind", t.WARD_SWEEP_WIND * 0.15],
+    ["warden",  "sweep",     t.WARD_SWEEP_TIME * 0.4],
+    ["warden",  "aim",       t.WARD_AIM * 0.2],
+    ["rusher",  "leap",      0.1]
+  ];
+  rects.length = 0;
+  ctx.fillStyle = "#20242E"; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = "#3A4152"; ctx.fillRect(0, 84, W, 1);
+  t.restart();
+  // One body per case, parked on the shot's own ground line, each in the state
+  // being photographed. The camera is pinned so screen x is world x.
+  t.cam.x = 0; t.cam.y = 20 * t.TILE - 84;   // feet land on the shot's ground line
+  for (const e of t.enemies) e.alive = false;
+  cases.forEach(([kind, state, timer], i) => {
+    const e = t.enemies.find(en => en.kind === kind && !en.alive);
+    if (!e) return;
+    e.alive = true; e.dying = 0;
+    e.x = 40 + i * 84; e.y = 20 * t.TILE - t.ENEMY_H;
+    e.facing = 1; e.state = state; e.timer = timer;
+  });
+  t.drawEntities();
+  writePNG("shot-foeattack.png", scale(raster(W, H, rects), W, H, k), W * k, H * k);
+  console.log("wrote shot-foeattack.png (" + cases.map(c => c[0][0] + ":" + c[1]).join(" ") + ")");
+}
+
+// --- 11. the ledge sentry, start to finish -------------------------------
+// Height used to be decoration -- a warden on a roof fired over your head and
+// could not be reached. This is the sequence that replaced that: perch, crouch
+// (the only warning, with the drop shaft and landing pad painted for the player
+// on the floor), the drop with the weapon leading, then the landing beat.
+{
+  const W = 520, H = 150, k = 3;
+  const cases = [
+    ["perch",     0],
+    ["perchWind", t.PERCH_WIND * 0.55],
+    ["perchWind", t.PERCH_WIND * 0.08],
+    ["dive",      0],
+    ["perchLand", t.PERCH_LAND * 0.5]
+  ];
+  rects.length = 0;
+  ctx.fillStyle = "#20242E"; ctx.fillRect(0, 0, W, H);
+  t.restart();
+  // A ledge 64px up, and the alley floor under it, drawn for each case so the
+  // drop has somewhere visible to go.
+  const GY = 132, LEDGE = GY - 64;
+  ctx.fillStyle = "#3A4152"; ctx.fillRect(0, GY, W, 2);
+  for (let i = 0; i < cases.length; i++) {
+    ctx.fillStyle = "#4A4034";
+    ctx.fillRect(14 + i * 104, LEDGE, 56, 10);
+  }
+  t.cam.x = 0; t.cam.y = 20 * t.TILE - GY;
+  for (const e of t.enemies) e.alive = false;
+  cases.forEach(([state, timer], i) => {
+    const e = t.enemies.find(en => en.kind === "rusher" && !en.alive);
+    if (!e) return;
+    e.alive = true; e.dying = 0; e.ledge = true;
+    e.x = 24 + i * 104;
+    // perch and the crouch stand ON the ledge; the dive is caught mid-fall and
+    // the landing is on the floor.
+    const feet = state === "dive" ? GY - 26 : state === "perchLand" ? GY : LEDGE;
+    e.y = (20 * t.TILE - GY) + feet - t.ENEMY_H;
+    e.facing = 1; e.diveDir = 1; e.state = state; e.timer = timer;
+    e.vy = state === "dive" ? 200 : 0;
+  });
+  t.drawEntities();
+  writePNG("shot-sentry.png", scale(raster(W, H, rects), W, H, k), W * k, H * k);
+  console.log("wrote shot-sentry.png (" +
+              cases.map((c, i) => c[0]).join(" -> ") + ")");
+}
+
+// --- 12. a real sentry, in the real alley --------------------------------
+// The strip above is staged on a drawn ledge. This is the same thing happening
+// in the actual stage, with the real camera, the real cover block and the real
+// ground under it -- which is the only version that proves the drop shaft and
+// the landing pad land where the player would see them.
+["perchWind", "dive"].forEach((want, idx) => {
+  shoot("shot-sentry-live" + (idx + 1) + ".png", () => {
+    t.restart(); t.wakeT = 0;
+    // restart() resets cam.x and NOT cam.y, so the staged strips above leak
+    // their vertical camera into every later shot. Put it back.
+    t.cam.y = t.CAM_Y;
+    t.ninja.y = 20 * t.TILE - t.BODY_H; t.ninja.onGround = true; t.ninja.facing = 1;
+    /* Far enough back that the sentry is still perched, then walk into its
+       strip. Tile 17, not 14: segment 1 has a pit at columns 14-15, and
+       starting on its lip meant every run of this shot fell in, died, and
+       photographed an empty alley. */
+    t.ninja.x = 17 * t.TILE;
+    t.snapCamera();
+    let seen = 0;
+    for (let i = 0; i < 900; i++) {
+      t.ninja.invuln = 999;
+      t.keys.add("ArrowRight");
+      t.update(t.STEP);
+      t.updateCamera();
+      const s = t.enemies.find(e => e.ledge && e.state === want);
+      // A couple of frames INTO the state, so the crouch has visibly deepened
+      // and the dive has left the ledge.
+      if (s && ++seen >= (want === "dive" ? 9 : 4)) break;
+    }
+    t.keys.clear();
+    t.ninja.invuln = 0;
+    t.playTime = 9; t.score = 400;
+    // The sentry ON SCREEN, not merely the first one in the array -- the array
+    // is ordered by map row, so `find` hands back one three segments away.
+    const s = t.enemies.find(e => e.ledge && e.x > t.cam.x && e.x < t.cam.x + t.VIEW_W);
+    console.log(`   sentry: state=${s && s.state} pose=${s && t.enemyPoseOf(s)}` +
+                ` feet=${s && (s.y + s.h).toFixed(0)}` +
+                ` dx=${s && (t.ninja.x - s.x).toFixed(0)} ninja=${t.ninja.x.toFixed(0)}` +
+                ` hazards=${t.hazards.length}`);
+  });
+});
