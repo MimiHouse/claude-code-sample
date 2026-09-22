@@ -39,7 +39,7 @@
    "x": 248,
    "y": 0
   },
-  "charger/idleB": {
+  "charger/down": {
    "dh": 52,
    "dw": 62,
    "h": 104,
@@ -47,7 +47,7 @@
    "x": 372,
    "y": 0
   },
-  "charger/lunge": {
+  "charger/falling": {
    "dh": 52,
    "dw": 62,
    "h": 104,
@@ -55,7 +55,7 @@
    "x": 496,
    "y": 0
   },
-  "charger/walkA": {
+  "charger/idleB": {
    "dh": 52,
    "dw": 62,
    "h": 104,
@@ -63,7 +63,7 @@
    "x": 620,
    "y": 0
   },
-  "charger/walkB": {
+  "charger/lunge": {
    "dh": 52,
    "dw": 62,
    "h": 104,
@@ -71,7 +71,7 @@
    "x": 744,
    "y": 0
   },
-  "charger/walkC": {
+  "charger/walkA": {
    "dh": 52,
    "dw": 62,
    "h": 104,
@@ -79,12 +79,28 @@
    "x": 868,
    "y": 0
   },
-  "charger/walkD": {
+  "charger/walkB": {
    "dh": 52,
    "dw": 62,
    "h": 104,
    "w": 124,
    "x": 0,
+   "y": 104
+  },
+  "charger/walkC": {
+   "dh": 52,
+   "dw": 62,
+   "h": 104,
+   "w": 124,
+   "x": 124,
+   "y": 104
+  },
+  "charger/walkD": {
+   "dh": 52,
+   "dw": 62,
+   "h": 104,
+   "w": 124,
+   "x": 248,
    "y": 104
   },
   "ninja/crouch": {
@@ -193,162 +209,194 @@
   },
   "rusher/base": {
    "dh": 48,
-   "dw": 48,
+   "dw": 68,
    "h": 96,
-   "w": 96,
+   "w": 136,
    "x": 0,
    "y": 408
   },
   "rusher/coil": {
    "dh": 48,
-   "dw": 48,
+   "dw": 68,
    "h": 96,
-   "w": 96,
-   "x": 96,
+   "w": 136,
+   "x": 136,
+   "y": 408
+  },
+  "rusher/down": {
+   "dh": 48,
+   "dw": 68,
+   "h": 96,
+   "w": 136,
+   "x": 272,
+   "y": 408
+  },
+  "rusher/falling": {
+   "dh": 48,
+   "dw": 68,
+   "h": 96,
+   "w": 136,
+   "x": 408,
    "y": 408
   },
   "rusher/idleB": {
    "dh": 48,
-   "dw": 48,
+   "dw": 68,
    "h": 96,
-   "w": 96,
-   "x": 192,
+   "w": 136,
+   "x": 544,
    "y": 408
   },
   "rusher/leap": {
    "dh": 48,
-   "dw": 48,
+   "dw": 68,
    "h": 96,
-   "w": 96,
-   "x": 288,
+   "w": 136,
+   "x": 680,
    "y": 408
   },
   "rusher/walkA": {
    "dh": 48,
-   "dw": 48,
+   "dw": 68,
    "h": 96,
-   "w": 96,
-   "x": 384,
+   "w": 136,
+   "x": 816,
    "y": 408
   },
   "rusher/walkB": {
    "dh": 48,
-   "dw": 48,
+   "dw": 68,
    "h": 96,
-   "w": 96,
-   "x": 480,
+   "w": 136,
+   "x": 952,
    "y": 408
   },
   "rusher/walkC": {
    "dh": 48,
-   "dw": 48,
+   "dw": 68,
    "h": 96,
-   "w": 96,
-   "x": 576,
-   "y": 408
+   "w": 136,
+   "x": 0,
+   "y": 504
   },
   "rusher/walkD": {
    "dh": 48,
-   "dw": 48,
+   "dw": 68,
    "h": 96,
-   "w": 96,
-   "x": 672,
-   "y": 408
+   "w": 136,
+   "x": 136,
+   "y": 504
   },
   "rusher/wallGrab": {
    "dh": 48,
-   "dw": 48,
+   "dw": 68,
    "h": 96,
-   "w": 96,
-   "x": 0,
+   "w": 136,
+   "x": 272,
    "y": 504
   },
   "rusher/wallOver": {
    "dh": 48,
-   "dw": 48,
+   "dw": 68,
    "h": 96,
-   "w": 96,
-   "x": 96,
+   "w": 136,
+   "x": 408,
    "y": 504
   },
   "warden/aim": {
    "dh": 48,
-   "dw": 41,
+   "dw": 69,
    "h": 96,
-   "w": 82,
-   "x": 192,
+   "w": 138,
+   "x": 544,
    "y": 504
   },
   "warden/base": {
    "dh": 48,
-   "dw": 41,
+   "dw": 69,
    "h": 96,
-   "w": 82,
-   "x": 274,
+   "w": 138,
+   "x": 682,
    "y": 504
   },
   "warden/coil": {
    "dh": 48,
-   "dw": 41,
+   "dw": 69,
    "h": 96,
-   "w": 82,
-   "x": 356,
+   "w": 138,
+   "x": 820,
+   "y": 504
+  },
+  "warden/down": {
+   "dh": 48,
+   "dw": 69,
+   "h": 96,
+   "w": 138,
+   "x": 958,
    "y": 504
   },
   "warden/duck": {
    "dh": 48,
-   "dw": 41,
+   "dw": 69,
    "h": 96,
-   "w": 82,
-   "x": 438,
-   "y": 504
+   "w": 138,
+   "x": 0,
+   "y": 600
+  },
+  "warden/falling": {
+   "dh": 48,
+   "dw": 69,
+   "h": 96,
+   "w": 138,
+   "x": 138,
+   "y": 600
   },
   "warden/idleB": {
    "dh": 48,
-   "dw": 41,
+   "dw": 69,
    "h": 96,
-   "w": 82,
-   "x": 520,
-   "y": 504
+   "w": 138,
+   "x": 276,
+   "y": 600
   },
   "warden/sweep": {
    "dh": 48,
-   "dw": 41,
+   "dw": 69,
    "h": 96,
-   "w": 82,
-   "x": 602,
-   "y": 504
+   "w": 138,
+   "x": 414,
+   "y": 600
   },
   "warden/walkA": {
    "dh": 48,
-   "dw": 41,
+   "dw": 69,
    "h": 96,
-   "w": 82,
-   "x": 0,
+   "w": 138,
+   "x": 552,
    "y": 600
   },
   "warden/walkB": {
    "dh": 48,
-   "dw": 41,
+   "dw": 69,
    "h": 96,
-   "w": 82,
-   "x": 82,
+   "w": 138,
+   "x": 690,
    "y": 600
   },
   "warden/walkC": {
    "dh": 48,
-   "dw": 41,
+   "dw": 69,
    "h": 96,
-   "w": 82,
-   "x": 164,
+   "w": 138,
+   "x": 828,
    "y": 600
   },
   "warden/walkD": {
    "dh": 48,
-   "dw": 41,
+   "dw": 69,
    "h": 96,
-   "w": 82,
-   "x": 246,
+   "w": 138,
+   "x": 966,
    "y": 600
   }
  },
@@ -357,7 +405,7 @@
   "characters": {
    "charger": {
     "author": "Ragewortt",
-    "bodyLuma": 118.8,
+    "bodyLuma": 126.1,
     "creditRequired": true,
     "frame": {
      "dh": 52,
@@ -367,7 +415,7 @@
     },
     "licence": "CC-BY 3.0",
     "pack": "fh-samurai",
-    "poses": 9
+    "poses": 11
    },
    "ninja": {
     "author": "gameart2d.com",
@@ -385,31 +433,31 @@
    },
    "rusher": {
     "author": "gameart2d.com",
-    "bodyLuma": 136.1,
+    "bodyLuma": 137.1,
     "creditRequired": false,
     "frame": {
      "dh": 48,
-     "dw": 48,
+     "dw": 68,
      "h": 96,
-     "w": 96
+     "w": 136
     },
     "licence": "CC0 / public domain",
     "pack": "ninjagirlnew",
-    "poses": 10
+    "poses": 12
    },
    "warden": {
     "author": "Ragewortt",
-    "bodyLuma": 165.7,
+    "bodyLuma": 165.3,
     "creditRequired": true,
     "frame": {
      "dh": 48,
-     "dw": 41,
+     "dw": 69,
      "h": 96,
-     "w": 82
+     "w": 138
     },
     "licence": "CC-BY 3.0",
     "pack": "fh-samurai",
-    "poses": 10
+    "poses": 12
    }
   },
   "creditRequired": [
@@ -518,5 +566,5 @@
    "ninjagirlnew"
   ]
  },
- "version": "60eb29277ac7"
+ "version": "9b1798dfa66b"
 }

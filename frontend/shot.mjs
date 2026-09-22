@@ -47,7 +47,7 @@ globalThis.__t = { ninja, cam, render, update, updateCamera, snapCamera, spawn,
   ENEMY_WAKE, get hazards() { return hazards; },
   RENDER_SCALE, drawTextHD, textWidthHD, FONT_HD, FONT_HD_W, FONT_HD_H,
   drawPose, ART, ENEMY_POSES,
-  CREDITS, drawCredits,
+  CREDITS, drawCredits, CORPSE_BLADE, CORPSE_SHURIKEN, CORPSE_LAND, CUT_HOLD,
   slash, get hitFreeze() { return hitFreeze; }, get trauma() { return trauma; },
   get punchX() { return punchX; }, shakeOffsetX, shakeOffsetY, killEnemy,
   get particles() { return particles; }, TILE, BODY_W };`;
@@ -793,3 +793,40 @@ shoot("shot-credits.png", () => {
   writePNG("shot-rest.png", scale(raster(W, H, rects), W, H, k), W * k, H * k);
   console.log("wrote shot-rest.png (" + i + " figures, base and idleB)");
 }
+
+// --- 18. a kill, by each weapon, at the frame that shows it -------------
+// The old effect was a radial spray of bright specks where a body used to be,
+// and the body was never drawn at all -- which together read as a firecracker.
+// Each of these is held at the frame its own thing is legible in, because the
+// cut lasts five frames and the collapse lasts thirty-five: no single still
+// shows both.
+[["blade", true, 2], ["shuriken", false, 7], ["settle", true, 26]]
+  .forEach(([name, blade, frames]) => {
+    shoot("shot-kill-" + name + ".png", () => {
+      t.restart(); t.wakeT = 0; t.cam.y = t.CAM_Y;
+      let victim = null;
+      for (const e of t.enemies) {
+        if (!victim && e.kind === "charger" && !e.ledge && !e.post &&
+            e.x > 30 * t.TILE && e.x < 120 * t.TILE) { victim = e; continue; }
+        e.alive = false;
+      }
+      t.ninja.x = victim.x - (blade ? 34 : 130);
+      t.ninja.y = 20 * t.TILE - t.BODY_H;
+      t.ninja.onGround = true; t.ninja.facing = 1; t.ninja.invuln = 999;
+      t.snapCamera();
+      t.killEnemy(victim, blade, 1);
+      // Hitstop eats the first frames, which is the point of it -- so the count
+      // is real frames of the world moving, not frames of wall clock.
+      for (let i = 0, moved = 0; i < 200 && moved < frames; i++) {
+        const before = victim.dying;
+        t.ninja.invuln = 999;
+        t.update(t.STEP);
+        if (victim.dying !== before) moved++;
+      }
+      t.playTime = 41; t.score = 7800;
+      console.log(`   ${name}: dying ${victim.dying.toFixed(3)}/${victim.dyingMax}` +
+                  ` cut=${(victim.killCut || 0).toFixed(3)}` +
+                  ` debris=${t.particles.length}` +
+                  ` rest=${t.particles.filter(p => p.rest).length}`);
+    });
+  });

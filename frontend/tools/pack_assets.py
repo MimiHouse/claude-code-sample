@@ -508,6 +508,16 @@ CAST = [
              "wallGrab": ("Climb_", 3),
              "wallOver": ("Climb_", 6),
              "coil":     ("Slide__", 2),
+             # The corpse. `coil` used to stand in for it and it is a CROUCH at
+             # best -- on the samurai packs it is a braced combat stance, so a
+             # collapsing body looked like a body standing up. Each pack has its
+             # own death animation; this is a frame from late in it, when the
+             # body is down.
+             # Two frames of it, not one. Snapping straight to the final frame
+             # put a body flat on the ground two frames after the hit, which is
+             # a corpse appearing rather than a body falling.
+             "falling":  ("Dead__", 3),
+             "down":     ("Dead__", 7),
          }),
     # IRONCLAD: the heavy, and the reason a fourth pack was worth 46MB.
     # It used to be gameart2d's Knight -- plumed helm, round shield,
@@ -546,7 +556,12 @@ CAST = [
          # to fit above 80 without crowding: the first build of this pack put
          # the IRONCLAD at 155 and the GLAIVE at 160, five apart, which is not
          # a difference anyone can see mid-fight. 115 / 139 / 177 now. 
-         body=ramp_of("#3E2412", "#6B3E1E", "#A5703C", "#D69A62", "#F0CFA8"),
+         # Nudged up a step. Adding the two death frames shifted the measured
+         # mean to 117 against the player's 88 -- a 29-point gap where the suite
+         # asks for 30, which is the assertion doing its job on a change that
+         # had nothing to do with colour. The span is unchanged; it just sits
+         # slightly higher.
+         body=ramp_of("#4A2C16", "#7A4824", "#B07C44", "#DCA46C", "#F2D4B0"),
          accent=ramp_of("#5E1410", "#9E2418", "#CE4A32"),
          outline="#2A1710", white="#FFFFFF",
          poses={
@@ -557,6 +572,8 @@ CAST = [
              "attack": ("Attack2H", 5),
              "lunge":  ("Attack2H", 2),
              "coil":   ("Alert2H", 0),
+             "falling": ("Die", 2),
+             "down":   ("Die", 6),
          }),
     # GLAIVE: the thrower. It used to share the PLAYER's body -- three packs for
     # four characters -- separated only by colour, height and the fact that
@@ -585,6 +602,8 @@ CAST = [
              "sweep": ("Attack1H", 5),
              "duck":  ("Alert1H", 3),
              "coil":  ("Attack1H", 1),
+             "falling": ("Die", 2),
+             "down":  ("Die", 6),
          }),
 ]
 

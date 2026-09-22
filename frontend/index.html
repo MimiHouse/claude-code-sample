@@ -355,6 +355,24 @@ const FLASH_GAIN = 0.85, FLASH_MAX = 0.40;
 // games and still the cheapest way to make a hit land.
 const IMPACT_TIME = 2 / 60;
 
+/* A BODY GOES DOWN, IT DOES NOT POP.
+   `dying` ran for 0.35s and nothing was drawn for any of it except two frames
+   of white silhouette -- so a killed enemy vanished, and the only thing left on
+   screen was a radial spray of bright specks. That combination is what read as
+   a firecracker going off where a body used to be.
+
+   The corpse is drawn for the whole window now: it crouches, sinks, throws a
+   little dust where it lands, and fades. The sprites cannot rotate, so the
+   collapse is built out of the poses that exist -- `coil` is already a crouch,
+   generated for the ledge sentries -- plus a few pixels of sink and a slide
+   along the blow. That is enough; what was missing was any body at all.
+
+   A blade takes longer to go down than a thrown star does, because the blow is
+   heavier and the cut has to be read. */
+const CORPSE_BLADE = 0.58, CORPSE_SHURIKEN = 0.46;
+const CORPSE_LAND = 0.42;        // fraction of the window spent falling
+const CUT_HOLD = 5 / 60;         // the cut line's bright frames
+
 const DEATH_HOLD = 0.12, DEATH_FADE = 0.33, DEATH_TIME = 1.05;
 
 // Three lives per run. Spending the last one ends the run and returns to the
@@ -2673,6 +2691,14 @@ function breathe(rows) {
 for (const kind in ENEMY_POSES) {
   ENEMY_POSES[kind].coil = squat(ENEMY_POSES[kind].base, 9);
   ENEMY_POSES[kind].idleB = breathe(ENEMY_POSES[kind].base);
+  /* DOWN: the corpse, when there is no atlas. Twenty-two rows of squat crushes
+     the body onto its own feet, which at 44px reads as a heap rather than as a
+     crouch -- and a heap is what is wanted, because the alternative the
+     collapse used before this was `coil`, a nine-row crouch that on the samurai
+     packs is a braced combat stance. A body standing up is a poor corpse. */
+  ENEMY_POSES[kind].down = squat(ENEMY_POSES[kind].base, 22);
+  // The halfway frame, so the body bends before it lands.
+  ENEMY_POSES[kind].falling = squat(ENEMY_POSES[kind].base, 13);
 }
 
 for (const n in NINJA_POSES) validatePose(n, NINJA_POSES[n], NINJA_COLS, NINJA_ROWS);
@@ -4549,6 +4575,14 @@ function shakeOffsetY() {
   return Math.round(Math.cos(shakeFrame * 3.07) * SHAKE_PX * 0.7 * trauma * trauma + punchY);
 }
 
+/* A radial burst. Kept for the small incidental effects -- a shuriken striking
+   brick, dust off a landing -- where "something scattered here" is the whole
+   message and a direction would be noise.
+
+   It is NOT what a kill uses any more. Fired omnidirectionally in the victim's
+   palette plus white and yellow, at 175px/s with an upward bias, it is a
+   firework: particles leaving in every direction at once, sparkling, with no
+   relation to the blow that caused them. That is the effect this replaced. */
 function spawnBurst(cx, cy, count, colors, speed, life) {
   for (let i = 0; i < count; i++) {
     const a = (i / count) * Math.PI * 2 + Math.random() * 0.7;
@@ -4564,12 +4598,68 @@ function spawnBurst(cx, cy, count, colors, speed, life) {
   }
 }
 
+/* DEBRIS FROM A BLOW, which is a different thing from a burst in four ways that
+   all matter:
+
+   DIRECTION. It leaves in a CONE along the line the blow travelled, not a
+   circle. A circle says "this exploded"; a cone says "this was struck, from
+   there". It is the single change that stops a kill reading as a firework.
+
+   WEIGHT. Each piece carries its own gravity scale and air drag, so the heavy
+   chunks arc short and stop while the light grit carries. One gravity for
+   everything is why the old burst floated -- every piece followed the same
+   parabola and the eye reads that as paper.
+
+   NO SPARKLE. Colours come from the victim's DARK tones only. The white and the
+   yellow in the old list were doing most of the firework: bright warm specks
+   leaving a body in every direction are what a firecracker looks like.
+
+   SETTLING. A piece that has slowed below a threshold stops moving and sits
+   there for the rest of its life instead of drifting, so the debris comes to
+   rest rather than fading out mid-flight. */
+function spawnDebris(cx, cy, dirX, dirY, count, colors, speed, life, spread) {
+  const base = Math.atan2(dirY, dirX);
+  for (let i = 0; i < count; i++) {
+    // Cone, densest along the centre line: two samples averaged, which is a
+    // cheap triangular distribution.
+    const off = (Math.random() + Math.random() - 1) * spread;
+    const a = base + off;
+    const heavy = Math.random() < 0.35;
+    const sp = speed * (heavy ? 0.28 + Math.random() * 0.35
+                              : 0.55 + Math.random() * 0.85);
+    particles.push({
+      x: cx + (Math.random() - 0.5) * 6,
+      y: cy + (Math.random() - 0.5) * 10,
+      vx: Math.cos(a) * sp,
+      vy: Math.sin(a) * sp - sp * 0.18,        // a little lift, then gravity
+      t: 0, life: life * (heavy ? 0.9 + Math.random() * 0.6
+                                : 0.5 + Math.random() * 0.6),
+      c: colors[(Math.random() * colors.length) | 0],
+      // Big enough to see at 640x360 before the buffer scale: the first pass
+      // used 1-2px grit, which at this distance is a dirty screen.
+      s: heavy ? 4 + ((Math.random() * 2) | 0) : 2 + ((Math.random() * 2) | 0),
+      g: heavy ? 1.35 : 0.85,                   // gravity scale
+      d: heavy ? 2.6 : 0.9                      // drag, per second
+    });
+  }
+}
+
 function updateParticles(dt) {
   for (const p of particles) {
     p.t += dt;
-    p.vy += 900 * dt;
+    if (p.rest) continue;                       // already come to rest
+    p.vy += 900 * (p.g === undefined ? 1 : p.g) * dt;
+    if (p.d) {
+      // Exponential drag rather than a subtraction, so a fast piece loses a lot
+      // and a slow one loses almost nothing -- which is what air does.
+      const k = Math.exp(-p.d * dt);
+      p.vx *= k; p.vy *= k;
+    }
     p.x += p.vx * dt;
     p.y += p.vy * dt;
+    // Below walking pace it stops. Debris that fades out while still drifting
+    // reads as smoke; debris that lands reads as debris.
+    if (p.d && Math.abs(p.vx) < 12 && Math.abs(p.vy) < 12) p.rest = true;
   }
   particles = particles.filter(p => p.t < p.life);
 }
@@ -4578,9 +4668,14 @@ function drawParticles() {
   for (const p of particles) {
     const k = 1 - p.t / p.life;
     const s = Math.max(1, Math.round(p.s * (0.35 + k * 0.65)));
+    // Settled debris fades instead of shrinking away: it is lying on the
+    // ground, so it should not appear to be getting smaller.
+    ctx.globalAlpha = p.rest ? Math.max(0, Math.min(1, k * 2.2)) : 1;
     ctx.fillStyle = p.c;
-    ctx.fillRect(Math.round(p.x - cam.x), Math.round(p.y - cam.y), s, s);
+    ctx.fillRect(Math.round(p.x - cam.x), Math.round(p.y - cam.y),
+                 p.rest ? p.s : s, p.rest ? p.s : s);
   }
+  ctx.globalAlpha = 1;
 }
 
 // First solid row in a column, i.e. the surface a spawned enemy would land on.
@@ -4665,25 +4760,72 @@ function vaultAirborne(e) {
    and plays one for the whole swing, and it is the only caller that does. So
    the melee tier is read off it rather than threaded through as a second
    parameter that could disagree with the first. */
-function killEnemy(e, silent) {
+/* `silent` also means "by the blade": the arc suppresses the per-body kill cue
+   and plays one for the whole swing, and it is the only caller that does. So
+   the melee tier is read off it rather than threaded through as a second
+   parameter that could disagree with the first.
+
+   `dirHint` is the direction the blow TRAVELLED -- the slash's own fixed dir,
+   or the sign of the shuriken's velocity. Everything below is oriented by it,
+   which is the difference between debris and confetti. Absent, it falls back to
+   "away from the player", which is right for anything that kills without
+   having a direction of its own. */
+function killEnemy(e, silent, dirHint) {
   const blade = !!silent;
-  e.alive = false; e.dying = 0.35; e.impact = IMPACT_TIME; kills++;
+  const dir = dirHint ? (dirHint > 0 ? 1 : -1)
+            : ((ninja.x + ninja.w / 2) <= (e.x + e.w / 2) ? 1 : -1);
+  e.alive = false;
+  e.dying = blade ? CORPSE_BLADE : CORPSE_SHURIKEN;
+  e.dyingMax = e.dying;
+  e.impact = IMPACT_TIME;
+  e.killBlade = blade;
+  e.killDir = dir;
+  e.killCut = blade ? CUT_HOLD : 0;
+  e.dust = false;
+  kills++;
   score += SCORE_KILL;
+
   const pal = e.kind === "charger" ? P_CHARGER
             : e.kind === "rusher"  ? P_RUSHER : P_WARDEN;
-  spawnBurst(e.x + e.w / 2, e.y + e.h / 2, blade ? 17 : 13,
-             [pal.G, pal.H, pal.D, "#FFFFFF", "#FFE45E"], blade ? 175 : 150, 0.44);
-  // Hitstop is raised, never lowered: a second kill inside the first one's
-  // freeze must not cut it short.
-  hitFreeze = Math.max(hitFreeze, blade ? FREEZE_BLADE : FREEZE_SHURIKEN);
-  addTrauma(blade ? TRAUMA_BLADE : TRAUMA_SHURIKEN);
-  // The view is shoved AWAY from the player, along the line the blow travelled.
-  addPunch((e.x + e.w / 2) - (ninja.x + ninja.w / 2),
-           (e.y + e.h / 2) - (ninja.y + ninja.h / 2) - 10,
-           blade ? PUNCH_PX : PUNCH_PX * 0.6);
-  // Duration, not strength -- FLASH_GAIN carries the cut. It has to outlive the
-  // hitstop or it is never seen as its own effect.
-  flash = blade ? 0.14 : 0.11; flashCol = "255,250,225";
+  /* DARK TONES ONLY. The old list was [G, H, D, "#FFFFFF", "#FFE45E"] -- the
+     body's own colours plus white and gold -- and those last two were most of
+     the firework. Bright warm specks leaving a body in every direction is what
+     a firecracker looks like. */
+  /* MID TONES, and this is a correction to the first attempt at fixing the
+     firework. Cutting the white and the gold was right -- bright warm specks
+     leaving a body in every direction is a firecracker -- but replacing them
+     with the OUTLINE colour went too far: K sits near luminance 38 and the
+     alley wall is 108, so eighteen pieces of debris were invisible against the
+     brick they were flying over. These are the body's own shadow, base and lit
+     tones: unmistakably part of the body, and readable against it. */
+  const dark = [pal.D, pal.G, pal.G, pal.L || pal.G];
+  const cx = e.x + e.w / 2, cy = e.y + e.h * 0.45;
+
+  if (blade) {
+    /* A CUT. The debris follows the blade down and forward -- the player's arc
+       sweeps from overhead to the ground -- in one wide cone plus a narrow fast
+       spray along the cut itself. Two cones rather than one, because a single
+       spread either has no fast grit in it or no slow chunks. */
+    spawnDebris(cx, cy, dir, 0.42, 15, dark, 205, 0.62, 0.62);
+    spawnDebris(cx, cy, dir, 0.30, 7, dark, 330, 0.45, 0.16);
+    hitFreeze = Math.max(hitFreeze, FREEZE_BLADE);
+    addTrauma(TRAUMA_BLADE);
+    flash = 0.14;
+  } else {
+    /* A PIERCE. Less material, faster, and much tighter -- a thrown star takes
+       a line through a body rather than opening it. The corpse is knocked back
+       along the shot instead, which is where that energy goes. */
+    spawnDebris(cx, cy, dir, 0.12, 9, dark, 270, 0.42, 0.26);
+    // The entry mark: four bright specks AT THE WOUND and nowhere else. Bright
+    // is fine when it is a point; it was only a firework when it was radial.
+    spawnDebris(cx + dir * 4, cy, dir, -0.1, 4, [pal.M || "#C8CFDA", "#FFF2D0"],
+                150, 0.20, 0.5);
+    hitFreeze = Math.max(hitFreeze, FREEZE_SHURIKEN);
+    addTrauma(TRAUMA_SHURIKEN);
+    flash = 0.11;
+  }
+  flashCol = "255,250,225";
+  addPunch(dir, -0.25, blade ? PUNCH_PX : PUNCH_PX * 0.6);
   // A caller that kills several at once suppresses these: a dozen stacked kill
   // sounds is a noise blast rather than a dozen kills.
   if (!silent) sfxKill();
@@ -5539,6 +5681,15 @@ function update(dt) {
     if (!e.alive) {
       e.dying = Math.max(0, e.dying - dt);
       e.impact = Math.max(0, (e.impact || 0) - dt);
+      e.killCut = Math.max(0, (e.killCut || 0) - dt);
+      /* Dust at the moment the body comes to rest, once. Spawned here rather
+         than in the draw, because a renderer that pushes particles produces a
+         different world depending on whether anyone was looking. */
+      if (!e.dust && e.dyingMax && e.dying <= e.dyingMax * (1 - CORPSE_LAND)) {
+        e.dust = true;
+        spawnBurst(e.x + e.w / 2, e.y + e.h - 1, 5,
+                   ["#B6AC9A", "#8E8676", "#6A6458"], 55, 0.3);
+      }
       continue;
     }
     // A vaulter mid-air is always ticked: it is fired ahead of the camera on
@@ -5562,7 +5713,8 @@ function update(dt) {
       // silhouette falling out of the sky is to stand still and throw at it,
       // and the entrance becomes a free kill instead of something to react to.
       if (e.alive && !vaultAirborne(e) && overlaps(s, e)) {
-        killEnemy(e); s.dead = true;
+        // The shuriken's own travel, so the debris leaves along the shot.
+        killEnemy(e, false, Math.sign(s.vx) || 1); s.dead = true;
       }
     }
   }
@@ -5597,7 +5749,9 @@ function update(dt) {
       // shuriken kill (same killEnemy, same burst, same hitstop); only the
       // sound tells you which weapon did it.
       if (e.alive && !vaultAirborne(e) && overlaps(sl, e)) {
-        killEnemy(e, true); cut++;
+        // sl.dir is fixed at the swing and never re-read, which is exactly the
+        // direction the cut wants.
+        killEnemy(e, true, sl.dir); cut++;
       }
     }
     if (cut > 0 && !sl.hit) { sl.hit = true; sfxBladeKill(); }
@@ -7015,11 +7169,61 @@ function drawEntities() {
        the hit has a frame of its own instead of the body simply ceasing to be
        drawn. Run-coalesced, so it costs about forty rects. */
     if (!e.alive) {
+      const sx0 = Math.round(e.x - cam.x - (SPRITE_W - ENEMY_W) / 2);
+      const sy0 = Math.round(e.y + ENEMY_H - NINJA_ROWS * CELL_NINJA - cam.y);
       if (e.impact > 0) {
+        // The impact frame: two frames of flat white in the shape it was in.
         const ip = ENEMY_POSES[e.kind][enemyPoseOf(e)] || ENEMY_POSES[e.kind].base;
-        drawSilhouette(ip, Math.round(e.x - cam.x - (SPRITE_W - ENEMY_W) / 2),
-                       Math.round(e.y + ENEMY_H - NINJA_ROWS * CELL_NINJA - cam.y),
-                       e.facing === -1, "#FFFFFF", CELL_NINJA);
+        drawSilhouette(ip, sx0, sy0, e.facing === -1, "#FFFFFF", CELL_NINJA);
+        continue;
+      }
+      if (!e.dyingMax || e.dying <= 0) continue;
+
+      /* THE COLLAPSE. `p` runs 0 to 1 across the dying window; the body falls
+         over the first CORPSE_LAND of it and then lies there fading.
+
+         Sink and slide are eased differently on purpose: the fall decelerates
+         (it is landing) while the slide carries on at a decaying rate (it is
+         sliding). Both out of the same `fall`, which keeps them in step. */
+      const p = 1 - e.dying / e.dyingMax;
+      const fall = Math.min(1, p / CORPSE_LAND);
+      const ease = 1 - (1 - fall) * (1 - fall);
+      const sink = Math.round(ease * 7);
+      const slide = Math.round(e.killDir * ease * (e.killBlade ? 4 : 9));
+      /* TWO FRAMES OF FALLING, from the pack's own death animation. One frame
+         put the body flat on the ground two frames after the hit, which is a
+         corpse appearing rather than a body going down -- and the impact frame
+         before it means the eye sees standing, then lying, with nothing
+         between. The halfway pose is what makes it a fall. */
+      const key = fall < 0.55 ? "falling" : "down";
+      const pose = ENEMY_POSES[e.kind][key] || ENEMY_POSES[e.kind].base;
+      const pal = e.kind === "charger" ? P_CHARGER
+                : e.kind === "rusher"  ? P_RUSHER : P_WARDEN;
+      // Fades only over the last third, so the body is solid while it falls.
+      ctx.globalAlpha = p < 0.66 ? 1 : Math.max(0, (1 - p) / 0.34);
+      drawPose(pose, e.kind + "/" + key, sx0 + slide, sy0 + sink,
+               e.facing === -1, pal, CELL_NINJA);
+      ctx.globalAlpha = 1;
+
+      /* THE CUT, held for five frames over the body it went through. A blade
+         kill needs a mark that a thrown star does not get: without it the two
+         deaths differ only in how much debris flies, which is a difference in
+         quantity where the player is being told about a difference in KIND. */
+      if (e.killCut > 0) {
+        const k = e.killCut / CUT_HOLD;
+        const cy = Math.round(e.y + e.h * 0.42 - cam.y) + sink;
+        const x0 = Math.round(e.x - 5 - cam.x) + slide;
+        const w = e.w + 10;
+        const lean = Math.round(e.killDir * 5);
+        // Two offset segments rather than one flat bar: a cut through a body is
+        // a line at an angle, and a horizontal bar reads as a health meter.
+        ctx.fillStyle = k > 0.5 ? "#FFFFFF" : "#FFE2A8";
+        ctx.fillRect(x0, cy + lean, (w / 2) | 0, 2);
+        ctx.fillRect(x0 + ((w / 2) | 0), cy - lean, (w / 2) | 0, 2);
+        ctx.globalCompositeOperation = "lighter";
+        ctx.fillStyle = "rgba(255,190,120," + (0.22 * k).toFixed(3) + ")";
+        ctx.fillRect(x0 - 3, cy - 4, w + 6, 10);
+        ctx.globalCompositeOperation = "source-over";
       }
       continue;
     }
