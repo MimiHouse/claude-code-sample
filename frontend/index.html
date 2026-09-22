@@ -2711,8 +2711,8 @@ const SEGMENTS = [
     "........................................",
     "........................................",
     "........................................",
-    "........................................",
-    "........................................",
+    "..............................G.........",
+    "............................XXXXXXXXXX..",
     "........................R...............",
     ".........XXX............XX..............",
     "...P.....XXX............XX.C..S.....F...",
@@ -2736,8 +2736,8 @@ const SEGMENTS = [
     "........................................",
     "............F...........................",
     "...........XXX..........................",
-    ".....R.............G....................",
-    ".....XXXX..........XXXX.................",
+    "....SR.............G............R.......",
+    "..XXXXXXXXXXX......XXXX.......XXXXXXXX..",
     "........................................",
     "...............XX.........XX............",
     "..R......T...T.XX.R...G...XX.C..R....R..",
@@ -2786,8 +2786,8 @@ const SEGMENTS = [
     ".......................XXXX.............",
     ".................R......................",
     ".................XXX....................",
-    "..........G.............................",
-    "..........XXXX..........................",
+    "..........GG....................S.......",
+    ".........XXXXXXXXXXXXXXX......XXXXXXXX..",
     "........................................",
     "....XXX...................XX............",
     "..S.XXX.T.....R....S....T.XX.R..G....S..",
@@ -2811,8 +2811,8 @@ const SEGMENTS = [
     "........................................",
     "........................................",
     ".............C..........................",
-    ".............XX.........................",
-    "..........F.............................",
+    ".............XX......R..................",
+    "..........F........XXXXXXX..............",
     "..........XX................R...........",
     "............................XX..........",
     "..R....S........S...R..C..S.XX....G.....",
@@ -2836,8 +2836,8 @@ const SEGMENTS = [
     "........................................",
     ".....................G..................",
     ".....................XXXX...............",
-    "...S....................................",
-    "..XXXXXX................................",
+    "...SG...................................",
+    "..XXXXXXXX..............................",
     "........................................",
     "............XX..XX..X...................",
     ".........F..XXS.XX..X.T...G......C..R...",
@@ -2886,8 +2886,8 @@ const SEGMENTS = [
     "........................XXXX............",
     "........................................",
     "........................................",
-    "................S.C.....................",
-    "................XXXXX...................",
+    "................S.CS....................",
+    "................XXXXXXXXX...............",
     "...........................R............",
     "......XX...................XX...........",
     "....S.XX.S....S......T...R.XX......G....",
@@ -2911,8 +2911,8 @@ const SEGMENTS = [
     "........................XXXX............",
     "..................G.....................",
     "..................XXX...................",
-    "........................................",
-    "............XXXX........................",
+    "..............R.........................",
+    "............XXXXXXXXXXXXXXXXX...........",
     "......S.................................",
     ".....XXXXX..............................",
     "..R..XXXXX.S....G....T...S....R.......S.",
@@ -2936,8 +2936,8 @@ const SEGMENTS = [
     "........................................",
     "........................................",
     "........................................",
-    "..........................R.............",
-    "..........................XXXX..........",
+    "........................G.R.............",
+    "......................XXXXXXXXXXXXXXXX..",
     "................S.......................",
     "..........XX....XXXX....................",
     "..T...S...XX..R.XXXX..G.......R...F.....",
@@ -3080,7 +3080,16 @@ const FLOOR_ROWS = [ROWS - 2, ROWS - 1];  // 20, 21 -- the alley floor
 const COVER_ROWS = [ROWS - 4, ROWS - 3];  // 18, 19 -- the 2-tile cover blocks
 
 function isPitCol(tx) {
-  for (let ty = 0; ty < ROWS; ty++) if (solidAt(tx, ty)) return false;
+  /* A pit is a hole in the FLOOR, and this used to scan every row -- so a
+     column stopped being a pit the moment anything was built above it. That was
+     harmless while row 16 held nothing but the occasional four-tile stepping
+     stone; with walkways up there, most pits in the stage acquired a roof and
+     silently stopped being pits. Two things would have gone quiet at once: the
+     lip rule, which only fires on pit columns, and the stage-variety check that
+     counts pit widths.
+
+     You still fall through a roofed hole. Only the floor rows decide. */
+  for (const ty of FLOOR_ROWS) if (solidAt(tx, ty)) return false;
   return true;
 }
 
@@ -3344,8 +3353,26 @@ const MASTER_VOL = 0.85, SFX_VOL = 0.55, MUSIC_VOL = 0.20;
 let actx = null, masterGain = null, sfxGain = null, musicGain = null;
 let noiseBuf = null, muted = saved.muted;
 
+/* CREATE, THEN RESUME -- and the second half was missing, which cost the whole
+   soundtrack.
+
+   A context built outside a user gesture is created successfully and starts
+   SUSPENDED. That was harmless while there were no assets: loadCues() returned
+   before touching audio, so the first keypress built the context inside a
+   gesture and it started running.
+
+   The moment a manifest declared audio, loadCues() began creating the context
+   during page load -- correctly, because decodeAudioData needs one and works on
+   a suspended context -- and from then on the guard `if (actx) return` made
+   every later gesture a no-op. The context existed, the cues decoded, the
+   scheduler ran, and nothing was ever audible for the entire session. No music,
+   no sound effects, with assets present.
+
+   So the two jobs are separated: build it at most once, and resume it every
+   time a gesture arrives until it is running. */
 function audioUnlock() {
-  if (actx || !AC) return;
+  if (!AC) return;
+  if (actx) { audioResume(); return; }
   try { actx = new AC(); } catch (err) { actx = null; return; }
   masterGain = actx.createGain();
   masterGain.gain.value = muted ? 0 : MASTER_VOL;
@@ -3362,6 +3389,16 @@ function audioUnlock() {
   const d = noiseBuf.getChannelData(0);
   for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
   musicNext = actx.currentTime;
+  audioResume();
+}
+
+function audioResume() {
+  if (!actx) return;
+  // `state` and `resume` are both absent in the headless harness, where there
+  // is nothing to resume.
+  if (actx.state === "suspended" && typeof actx.resume === "function") {
+    try { actx.resume(); } catch (err) { /* it will be retried next gesture */ }
+  }
 }
 
 function toggleMute() {
@@ -3841,7 +3878,12 @@ function schedBrush(at) {
   src.start(at, Math.random() * 1.5, 0.62);
 }
 
-function musicWanted() { return mode === "title" || mode === "play"; }
+/* The loading screen wants it too. The cues finish decoding during that wait,
+   so starting there means the opening has music from the first frame the player
+   sees rather than from whenever they happen to press something. */
+function musicWanted() {
+  return mode === "loading" || mode === "title" || mode === "play";
+}
 
 function pumpMusic() {
   if (!actx) return;
@@ -4164,6 +4206,13 @@ function togglePause() {
   if (mode === "play") mode = "paused";
   else if (mode === "paused") mode = "play";
 }
+
+/* Every plausible first gesture unlocks audio, and pointerdown fires before
+   click -- which matters on the title screen, where the click that unlocks the
+   audio is also the click that starts the game, so anything later than the
+   press itself means the opening is silent. */
+addEventListener("pointerdown", audioUnlock, { passive: true });
+addEventListener("touchstart", audioUnlock, { passive: true });
 
 addEventListener("keydown", (e) => {
   if (HANDLED.has(e.code)) e.preventDefault();
@@ -6559,22 +6608,31 @@ function hazardPreview(x, y, w, h, prog, col, dir) {
   // own body outward, which is the other edge.
   const fx = (dir === undefined || dir > 0) ? x0 : x0 + w - fw;
 
-  ctx.fillStyle = "rgba(" + col + ",0.10)";
-  ctx.fillRect(fx, y0, fw, h);
-  ctx.fillStyle = "rgba(" + col + ",0.07)";
-  ctx.fillRect(fx, y0 + h * 0.34, fw, h * 0.32);      // a little body, no lines
-
-  // The leading edge: two soft steps, brightening as the attack nears.
-  const lead = (dir === undefined || dir > 0) ? fx + fw : fx;
-  ctx.fillStyle = "rgba(" + col + "," + (0.30 + prog * 0.45).toFixed(3) + ")";
-  ctx.fillRect(lead - hair, y0, hair * 2, h);
-  ctx.fillStyle = "rgba(" + col + "," + (0.12 + prog * 0.18).toFixed(3) + ")";
-  ctx.fillRect(lead - hair * 4, y0, hair * 3, h);
-
-  // A hairline outline so the extent is readable before the wipe reaches it.
-  ctx.fillStyle = "rgba(" + col + "," + (0.10 + prog * 0.16).toFixed(3) + ")";
+  /* THE EXTENT COMES FIRST, AT FULL STRENGTH.
+     The outline used to be a hairline that brightened WITH the fill, so on the
+     opening frames of a windup -- the frames you actually have to react on --
+     the reach was the faintest thing on screen and the only clear mark was a
+     sliver at the attacker's own feet. Where it reaches is what you need
+     earliest; how long you have is what the fill is for. */
+  rangeBrackets(x0, y0, w, h, col, 0.78, Math.min(10, w * 0.3));
+  ctx.fillStyle = "rgba(" + col + ",0.26)";
   ctx.fillRect(x0, y0, w, hair);
   ctx.fillRect(x0, y0 + h - hair, w, hair);
+  ctx.fillStyle = "rgba(" + col + ",0.55)";
+  const far = (dir === undefined || dir > 0) ? x0 + w - hair * 2 : x0;
+  ctx.fillRect(far, y0, hair * 2, h);        // the line to be behind
+
+  // ...then the fill, which is the clock.
+  ctx.fillStyle = "rgba(" + col + ",0.11)";
+  ctx.fillRect(fx, y0, fw, h);
+  ctx.fillStyle = "rgba(" + col + ",0.09)";
+  ctx.fillRect(fx, y0 + h * 0.32, fw, h * 0.34);
+
+  const lead = (dir === undefined || dir > 0) ? fx + fw : fx;
+  ctx.fillStyle = "rgba(" + col + "," + (0.35 + prog * 0.45).toFixed(3) + ")";
+  ctx.fillRect(lead - hair, y0, hair * 2, h);
+  ctx.fillStyle = "rgba(" + col + "," + (0.14 + prog * 0.18).toFixed(3) + ")";
+  ctx.fillRect(lead - hair * 4, y0, hair * 3, h);
 }
 
 const CHG_STEEL = ["#FFF4D8", "#FFD489", "rgba(226,150,74,0.60)"];
@@ -6656,6 +6714,79 @@ function hazardPreviewV(x, y, w, h, prog, col) {
   ctx.fillStyle = "rgba(" + col + "," + (0.10 + prog * 0.16).toFixed(3) + ")";
   ctx.fillRect(x0, y0, hair, h);
   ctx.fillRect(x0 + w - hair, y0, hair, h);
+}
+
+/* How far the warden's shot could travel from here, in pixels: walked in
+   BULLET_W steps against blockedAt on the bullet's own box, which is the
+   predicate the bullet itself is moved by, so the line and the shot cannot
+   disagree. Capped at WARD_RANGE, which is as far as it would fire anyway. */
+function sightReach(e, dir) {
+  const feet = e.y + e.h;
+  const by = feet - BULLET_Y_OFF;
+  const from = dir > 0 ? e.x + e.w : e.x - BULLET_W;
+  for (let d = 0; d < WARD_RANGE; d += BULLET_W) {
+    if (blockedAt(from + dir * d, by, BULLET_W, BULLET_H)) return Math.max(0, d);
+  }
+  return WARD_RANGE;
+}
+
+/* --- ATTACK RANGE, SHOWN ---------------------------------------------------
+   Two states, two different questions.
+
+   ARMED (the windup) has to answer WHERE and WHEN for a box that does not exist
+   yet, so it is predicted from the same constants the box will be built from.
+   The extent is bracketed at full strength from the FIRST frame, because
+   "where" is what you need earliest; the fill then sweeps across to say how
+   much of the windup is left.
+
+   LIVE is not predicted at all -- it is read straight out of the `hazards`
+   array, which is the thing that actually kills you. Nothing can drift: if the
+   box moves the drawing moves, and a live box with nothing drawn on it is now
+   impossible rather than merely unlikely. That was the gap -- the windup was
+   previewed and then the live frames showed only a weapon arc, so the one
+   moment the range mattered was the one moment nothing marked it. */
+function rangeBrackets(x, y, w, h, col, a, len) {
+  const hair = 1 / RENDER_SCALE;
+  const t = Math.max(hair * 2, len);
+  ctx.fillStyle = "rgba(" + col + "," + a.toFixed(3) + ")";
+  const x1 = x + w, y1 = y + h;
+  // Corners only. A closed rectangle reads as a UI panel; four corners read as
+  // a measured extent.
+  ctx.fillRect(x, y, t, hair);              ctx.fillRect(x, y, hair, t);
+  ctx.fillRect(x1 - t, y, t, hair);         ctx.fillRect(x1 - hair, y, hair, t);
+  ctx.fillRect(x, y1 - hair, t, hair);      ctx.fillRect(x, y1 - t, hair, t);
+  ctx.fillRect(x1 - t, y1 - hair, t, hair); ctx.fillRect(x1 - hair, y1 - t, hair, t);
+}
+
+function drawHazardZones() {
+  const hair = 1 / RENDER_SCALE;
+  for (const h of hazards) {
+    const x = Math.round((h.x - cam.x) * RENDER_SCALE) / RENDER_SCALE;
+    const y = Math.round((h.y - cam.y) * RENDER_SCALE) / RENDER_SCALE;
+    if (x + h.w < -8 || x > VIEW_W + 8) continue;
+    /* Brightest on the frame it appears and fading over its own life. `ttl` is
+       all the age a hazard carries, and leadHazard rebuilds its box every frame
+       with a two-frame ttl -- so for a dash or a dive this stays near full,
+       which is correct: that box IS new every frame. */
+    const k = Math.max(0, Math.min(1, h.ttl / (2 / 60)));
+    /* The fill is deliberately thin. A first pass at 0.24 with a 0.22 core over
+       it is an opaque slab against a dark alley, and a slab where the player is
+       looking for a way out is the scan-line grid's mistake in another form.
+       The BRACKETS and the leading faces carry the read; the fill only tints. */
+    const a = 0.06 + 0.08 * k;
+    ctx.fillStyle = "rgba(255,120,90," + a.toFixed(3) + ")";
+    ctx.fillRect(x, y, h.w, h.h);
+    // Stronger at strike height: the middle of the box is where a standing body
+    // is, and that is what the player is judging against.
+    ctx.fillStyle = "rgba(255,150,110," + (a * 0.85).toFixed(3) + ")";
+    ctx.fillRect(x, y + h.h * 0.30, h.w, h.h * 0.34);
+    rangeBrackets(x, y, h.w, h.h, "255,196,150", 0.55 + 0.35 * k,
+                  Math.min(9, h.w * 0.3));
+    // Both faces solid: these are the lines to be outside of.
+    ctx.fillStyle = "rgba(255,210,170," + (0.45 + 0.35 * k).toFixed(3) + ")";
+    ctx.fillRect(x + h.w - hair * 2, y, hair * 2, h.h);
+    ctx.fillRect(x, y, hair * 2, h.h);
+  }
 }
 
 function drawEnemyWeapon(e) {
@@ -6769,9 +6900,23 @@ function drawEnemyWeapon(e) {
       const ay = Math.round(feet - BULLET_Y_OFF - cam.y);
       const w = 1 - Math.max(0, e.timer) / WARD_AIM;
       thrustStreak(cx + dir * 4, ay, dir, 12 + Math.round(w * 14), 4, WARD_STEEL);
+      /* THE SIGHT LINE STOPS WHERE THE SHOT WOULD.
+         It ran the full WARD_RANGE regardless of geometry, so it drew straight
+         through a cover block and marked the ground beyond it as lethal -- the
+         exact opposite of what the block is for, and it made the one piece of
+         cover in the game look useless. The ray is walked against the SAME
+         predicate the bullet is moved by, on the bullet's own box at the
+         bullet's own height, so what the line claims is what the shot reaches. */
+      const reach = sightReach(e, dir);
       ctx.fillStyle = "rgba(180,230,255," + (0.10 + w * 0.26).toFixed(3) + ")";
-      for (let i = 26; i < WARD_RANGE; i += 8) {
-        ctx.fillRect(Math.round(cx + dir * i), ay, 4, 1);
+      for (let i = 26; i < reach; i += 8) {
+        ctx.fillRect(Math.round(cx + dir * i), ay, Math.min(4, reach - i), 1);
+      }
+      // A stop mark where it runs out, so "blocked" reads as blocked rather
+      // than as the line having been drawn short for no reason.
+      if (reach < WARD_RANGE - 2) {
+        ctx.fillStyle = "rgba(180,230,255," + (0.22 + w * 0.3).toFixed(3) + ")";
+        ctx.fillRect(Math.round(cx + dir * reach), ay - 3, 1, 7);
       }
     }
     return;
@@ -7171,6 +7316,72 @@ function hudPlate(x, y, w, h) {
   ctx.fillRect(x + hair, y + hair, w - hair * 2, hair);
 }
 
+/* A SECOND READOUT, BOTTOM LEFT, ON ONE ROW.
+   The top plates carry the same three numbers and they are hard to find: they
+   sit above the skyline in the brightest part of the frame, and in a
+   forward-only game the eyes live at the bottom of the screen where the ninja
+   and the ground are. So the three things you check WHILE fighting -- lives,
+   shuriken, flags -- get a compact readout in the corner nearest the action.
+   The top plates stay; that is where the score and the clock are read between
+   fights, and this does not replace them.
+
+   ONE ROW, not three. Stacked, the plate was 44px tall and stood up into the
+   playfield, covering the props and the ground the player is trying to read --
+   a HUD that hides the thing it is describing. Laid out horizontally it is 22px
+   and sits under everything.
+
+   Icons rather than words, at half size: the point is glanceability, and nobody
+   reads "SHURIKEN" mid-jump. Suppressed while the debug overlay is up, which
+   wants the same corner -- a dev view is allowed to take it back. */
+function drawLifeIcon(x, y, on) {
+  // A masked head: two tones of hood, the eye slit, the scarf. Nine pixels of
+  // character, which reads as "one of you left" where a red square does not.
+  ctx.fillStyle = on ? "#2E4A8C" : "#333A4A"; ctx.fillRect(x, y, 7, 7);
+  ctx.fillStyle = on ? "#4E72C4" : "#3C4354"; ctx.fillRect(x + 1, y + 1, 5, 2);
+  ctx.fillStyle = on ? "#EAF0F8" : "#4A5160"; ctx.fillRect(x + 2, y + 3, 4, 2);
+  if (on) { ctx.fillStyle = "#E8563F"; ctx.fillRect(x + 6, y + 3, 2, 4); }
+}
+
+function drawFlagIcon(x, y, hot) {
+  ctx.fillStyle = "#2B2622"; ctx.fillRect(x, y, 1, 9);
+  ctx.fillStyle = hot ? "#9CFF7A" : "#D62E3F"; ctx.fillRect(x + 1, y, 6, 5);
+  ctx.fillStyle = "#FFD24A";
+  ctx.fillRect(x + 1, y + 2 + (Math.floor(clock * 5) % 2), 5, 1);
+}
+
+function drawCornerReadout() {
+  const hair = 1 / RENDER_SCALE;
+  const ammo = String(shurikenAmmo);
+  const flagStr = flagsTaken + "/" + flags.length;
+  // Measured, not guessed: the plate is as wide as the three groups need and no
+  // wider, so a two-digit count cannot overrun its own background.
+  const gLife = START_LIVES * 9;
+  const gAmmo = 11 + textWidthHD(ammo, 3);
+  const gFlag = 9 + textWidthHD(flagStr, 2);
+  const GAP = 8;
+  const W = 8 + gLife + GAP + gAmmo + GAP + gFlag + 6;
+  const H = 22, y0 = VIEW_H - 4 - H;
+  hudPlate(4, y0, W, H);
+
+  let x = 10;
+  for (let i = 0; i < START_LIVES; i++) drawLifeIcon(x + i * 9, y0 + 7, i < lives);
+  x += gLife + GAP;
+
+  ctx.fillStyle = "rgba(255,228,94,0.16)";
+  ctx.fillRect(x - GAP / 2, y0 + 5, hair, H - 10);        // a divider per group
+  drawShurikenIcon(x - 1, y0 + 6, 10, Math.floor(clock * 8) % 2 === 0);
+  drawTextHD(ammo, x + 11, y0 + 7,
+             shurikenAmmo === 0 ? "#FF6A5A"
+             : shurikenAmmo <= 2 ? "#FFC24A" : "#EAF0F8", 3);
+  x += gAmmo + GAP;
+
+  ctx.fillStyle = "rgba(255,228,94,0.16)";
+  ctx.fillRect(x - GAP / 2, y0 + 5, hair, H - 10);
+  const all = flagsTaken >= flags.length;
+  drawFlagIcon(x, y0 + 7, all);
+  drawTextHD(flagStr, x + 9, y0 + 8, all ? "#9CFF7A" : "#FFE45E", 2);
+}
+
 function drawHud() {
   const hair = 1 / RENDER_SCALE;
 
@@ -7550,6 +7761,9 @@ function renderWorld() {
   drawTiles();
   drawGoal();
   drawProps();
+  // Under the bodies and over the tiles: a range mark drawn on top of the
+  // attacker hides the windup pose, which is the other half of the telegraph.
+  drawHazardZones();
   drawEntities();
   drawGhosts();     // under the body: a trail in front of it reads as a smear
   drawNinja();      // drawn during "dying" too: the freeze frame IS the effect
@@ -7572,6 +7786,7 @@ function renderWorld() {
       mode !== "loading") {
     drawHud();
     if (showDebug) drawDebug();
+    else drawCornerReadout();
   }
 
   if (mode === "loading") drawLoading();

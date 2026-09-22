@@ -41,6 +41,8 @@ globalThis.__t = { ninja, cam, render, update, updateCamera, snapCamera, spawn,
   DASH_TIME, CHG_WINDUP, CHG_SWING, CHG_LUNGE_WIND, WARD_SWEEP_WIND,
   WARD_SWEEP_TIME, WARD_AIM, ENEMY_H, ENEMY_W, ROWS,
   PERCH_WIND, PERCH_LAND, PERCH_SCAN, enemyPoseOf, solidAt, COLS, CAM_Y,
+  drawHazardZones, sightReach, WARD_RANGE, BULLET_Y_OFF, CHG_HIT_W, CHG_HIT_TOP,
+  CHG_HIT_BOT, WARD_SWEEP_REACH, WARD_SWEEP_TOP, WARD_SWEEP_BOT,
   ENEMY_WAKE, get hazards() { return hazards; },
   RENDER_SCALE, drawTextHD, textWidthHD, FONT_HD, FONT_HD_W, FONT_HD_H,
   drawPose, ART, ENEMY_POSES,
@@ -664,4 +666,78 @@ shoot("shot-impact.png", () => {
 shoot("shot-credits.png", () => {
   t.restart(); t.cam.y = t.CAM_Y; t.mode = "credits"; t.clock = 1.0;
   console.log(`   ${t.CREDITS.length} credit lines`);
+});
+
+// --- 15. attack range: armed, and live -----------------------------------
+// The windup was previewed and the live frames showed only a weapon arc, so the
+// one moment the range mattered was the one moment nothing marked it. Left pair
+// is armed (extent bracketed from the first frame, fill as the clock); right
+// pair is the box actually in `hazards`, read straight out of the array.
+{
+  const W = 560, H = 120, k = 2;
+  const cases = [
+    ["charger", "windup",    t.CHG_WINDUP * 0.55],
+    ["charger", "swing",     t.CHG_SWING * 0.6],
+    ["warden",  "sweepWind", t.WARD_SWEEP_WIND * 0.5],
+    ["warden",  "sweep",     t.WARD_SWEEP_TIME * 0.6]
+  ];
+  rects.length = 0;
+  ctx.fillStyle = "#20242E"; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = "#3A4152"; ctx.fillRect(0, 100, W, 1);
+  t.restart(); t.wakeT = 0;
+  t.cam.x = 0; t.cam.y = 20 * t.TILE - 100;
+  for (const e of t.enemies) e.alive = false;
+  t.hazards.length = 0;
+  cases.forEach(([kind, state, timer], i) => {
+    const e = t.enemies.find(en => en.kind === kind && !en.alive);
+    if (!e) return;
+    e.alive = true; e.dying = 0; e.ledge = false;
+    e.x = 26 + i * 138; e.y = 20 * t.TILE - t.ENEMY_H;
+    e.facing = 1; e.state = state; e.timer = timer;
+    // The live cases get the real box, built the way the AI builds it.
+    const feet = e.y + e.h;
+    if (state === "swing") {
+      t.hazards.push({ x: e.x + e.w, y: feet - t.CHG_HIT_TOP, w: t.CHG_HIT_W,
+                       h: t.CHG_HIT_TOP - t.CHG_HIT_BOT, ttl: timer });
+    } else if (state === "sweep") {
+      t.hazards.push({ x: e.x + e.w, y: feet - t.WARD_SWEEP_TOP,
+                       w: t.WARD_SWEEP_REACH,
+                       h: t.WARD_SWEEP_TOP - t.WARD_SWEEP_BOT, ttl: timer });
+    }
+  });
+  t.drawHazardZones();
+  t.drawEntities();
+  writePNG("shot-range.png", scale(raster(W, H, rects), W, H, k), W * k, H * k);
+  console.log("wrote shot-range.png (" + cases.map(c => c[1]).join(" ") +
+              ", " + t.hazards.length + " live boxes)");
+}
+
+// --- 16. the upper storey ------------------------------------------------
+// Row 16 used to hold the odd four-tile stepping stone. It now carries
+// walkways long enough to fight on, 64px up -- inside the 78px apex, so they
+// are reached from the floor without a step -- with the alley still running
+// underneath and a sentry posted up there.
+["floor", "up"].forEach((where, idx) => {
+  shoot("shot-upper" + (idx + 1) + ".png", () => {
+    t.restart(); t.wakeT = 0; t.cam.y = t.CAM_Y;
+    // Find the first long run on row 16 and stand at its left end.
+    let a = -1, run = null;
+    for (let c = 0; c <= t.COLS && !run; c++) {
+      const solid = c < t.COLS && t.solidAt(c, 16);
+      if (solid && a < 0) a = c;
+      else if (!solid && a >= 0) { if (c - a >= 9) run = [a, c - 1]; a = -1; }
+    }
+    const [x0, x1] = run;
+    const mid = Math.floor((x0 + x1) / 2);
+    if (where === "floor") {
+      t.ninja.x = (x0 + 2) * t.TILE; t.ninja.y = 20 * t.TILE - t.BODY_H;
+    } else {
+      t.ninja.x = mid * t.TILE; t.ninja.y = 16 * t.TILE - t.BODY_H;
+    }
+    t.ninja.onGround = true; t.ninja.facing = 1; t.ninja.invuln = 999;
+    t.snapCamera();
+    for (let i = 0; i < 3; i++) { t.ninja.invuln = 999; t.update(t.STEP); }
+    t.playTime = 22; t.score = 3100;
+    console.log(`   walkway tiles ${x0}..${x1} (${x1 - x0 + 1} wide), ninja ${where}`);
+  });
 });

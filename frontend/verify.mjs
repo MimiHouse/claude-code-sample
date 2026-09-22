@@ -328,7 +328,10 @@ function tickToElapsed(target) {
 }
 // Columns that are plain walkable ground with nothing overhead.
 function clearCol(c) {
-  return c >= 0 && t.solidAt(c, 20) && ![16, 17, 18, 19].some(r => t.solidAt(c, r));
+  // Rows 17-19, for the same reason flatRun() uses them: the body is three
+  // tiles, and a walkway on row 16 is a roof rather than an obstruction. Every
+  // approach in the stage now has one somewhere above it.
+  return c >= 0 && t.solidAt(c, 20) && ![17, 18, 19].some(r => t.solidAt(c, r));
 }
 // An enemy whose leftward approach is unobstructed, so its AI can actually run.
 // Picking enemies[0] blindly lands on ones parked behind a hop block.
@@ -367,8 +370,14 @@ const check = (name, cond, d = "") => {
 function flatRun(minLen) {
   let best = null, start = -1;
   for (let c = 0; c <= t.COLS; c++) {
+    /* Rows 17-19, not 16-19. The body is 48px -- three tiles -- so standing on
+       row 20 it occupies 17, 18 and 19 and nothing else. Row 16 was in this
+       list when row 16 held nothing but the odd four-tile stepping stone, and
+       including it cost nothing. Now that there are long walkways up there it
+       costs every stretch in the stage: no 20-column run has clear sky over
+       it any more, and this helper only needs somewhere to STAND and run. */
     const ok = c < t.COLS && t.solidAt(c, 20) &&
-               ![16, 17, 18, 19].some(r => t.solidAt(c, r));
+               ![17, 18, 19].some(r => t.solidAt(c, r));
     if (ok) { if (start < 0) start = c; continue; }
     if (start >= 0 && c - start >= minLen &&
         (!best || (c - start) > (best[1] - best[0] + 1))) best = [start, c - 1];
@@ -1443,6 +1452,60 @@ console.log("\n== stage variety (req: less monotonous) ==");
 const pitWidths = pits.map(([a, b]) => b - a + 1);
 check("pits come in several widths", new Set(pitWidths).size >= 3,
       `widths: ${pitWidths.join(",")}`);
+/* THE UPPER LEVEL.
+   Row 16 used to hold the odd four-tile stepping stone. It now carries proper
+   walkways -- runs long enough to fight on -- and the whole point is that they
+   are a second storey rather than decoration: reachable from the floor, walkable
+   under, and never built over a pit. Each of those is a separate claim. */
+{
+  const runs = [];
+  let a = -1;
+  for (let c = 0; c <= t.COLS; c++) {
+    const solid = c < t.COLS && t.solidAt(c, 16);
+    if (solid && a < 0) a = c;
+    else if (!solid && a >= 0) { runs.push([a, c - 1]); a = -1; }
+  }
+  const walkways = runs.filter(([x, y]) => y - x + 1 >= 7);
+  check("row 16 carries walkways, not just stepping stones",
+        walkways.length >= 6,
+        `${walkways.length} runs of 7+ tiles, longest ${Math.max(...runs.map(([x, y]) => y - x + 1))}`);
+
+  /* REACHABLE. The surface sits four tile rows above the floor, which is 64px,
+     and the apex is v^2/2g. If a later tuning pass lowers the jump, this is
+     what says the upper storey became unreachable. */
+  const rise = (t.ROWS - 2 - 16) * t.TILE;
+  const apex = (t.JUMP_VEL * t.JUMP_VEL) / (2 * t.GRAVITY_RISE);
+  check("the upper storey is reachable from the floor in one jump", apex > rise,
+        `apex ${apex.toFixed(0)}px over a ${rise}px step`);
+
+  // WALKABLE UNDERNEATH. Rows 17-19 is exactly BODY_H; anything solid in there
+  // would seal the alley under its own second storey.
+  let sealed = [];
+  for (const [x, y] of walkways) {
+    for (let c = x; c <= y; c++) {
+      if ([17, 18, 19].some(r => t.solidAt(c, r))) sealed.push(c);
+    }
+  }
+  check("the alley still runs underneath every walkway", sealed.length === 0,
+        sealed.length ? `sealed at ${sealed.slice(0, 5).join(",")}` : "3 tiles of clearance");
+
+  /* NEVER OVER A PIT, and this one was learned the hard way: roofing a gap
+     takes the sky away from its lip, which is where an enemy decides whether it
+     can leap. Chargers then held at the edge and rushers committed anyway and
+     fell in. Crossing a gap is the one place the AI reads the geometry above
+     itself, so that is the one place not to build. */
+  let roofed = [];
+  for (const [x, y] of walkways) {
+    for (let c = x; c <= y; c++) if (t.isPitCol(c)) roofed.push(c);
+  }
+  check("no walkway is built over a pit", roofed.length === 0,
+        roofed.length ? `roofed pit cols ${roofed.slice(0, 5).join(",")}` : `${pits.length} pits left open`);
+
+  check("the upper storey is contested",
+        t.enemies.filter(e => e.ledge && e.y + e.h === 16 * t.TILE).length >= 5,
+        `${t.enemies.filter(e => e.ledge && e.y + e.h === 16 * t.TILE).length} sentries on row 16`);
+}
+
 const ledgeRows = new Set();
 for (let r = 0; r < 20; r++)
   for (let c = 0; c < t.COLS; c++) if (t.solidAt(c, r)) { ledgeRows.add(r); break; }
