@@ -41,6 +41,7 @@ globalThis.__t = { ninja, cam, render, update, updateCamera, snapCamera, spawn,
   DASH_TIME, CHG_WINDUP, CHG_SWING, CHG_LUNGE_WIND, WARD_SWEEP_WIND,
   WARD_SWEEP_TIME, WARD_AIM, ENEMY_H, ENEMY_W, ROWS,
   PERCH_WIND, PERCH_LAND, PERCH_SCAN, enemyPoseOf, solidAt, COLS, CAM_Y,
+  enemyGait, IDLE_FPS,
   drawHazardZones, sightReach, WARD_RANGE, BULLET_Y_OFF, CHG_HIT_W, CHG_HIT_TOP,
   CHG_HIT_BOT, WARD_SWEEP_REACH, WARD_SWEEP_TOP, WARD_SWEEP_BOT,
   ENEMY_WAKE, get hazards() { return hazards; },
@@ -162,7 +163,17 @@ const ctx = {
    the built-in fallback. A missing folder is the normal, valid state and leaves
    the built-ins in place -- exactly as it does in a browser on file://. */
 let assetReads = 0;
-function assetPath(url) { return path.join(ASSET_DIR, String(url).replace(/^assets\//, "")); }
+function assetPath(url) {
+  /* The query has to go. The loader appends the manifest's content version --
+     "sprites.png?v=abc123" -- to bust the browser cache, and joining that onto
+     a directory asks the filesystem for a file whose name ends in "?v=abc123".
+     It does not exist, Image fires onerror, ART never becomes ready, and every
+     shot silently renders the BUILT-IN art while the atlas sits on disk beside
+     it. That is the worst possible failure for this tool: it does not error, it
+     photographs the fallback. */
+  const clean = String(url).split("?")[0];
+  return path.join(ASSET_DIR, clean.replace(/^assets\//, ""));
+}
 
 class FakeImage {
   constructor() { this.width = 0; this.height = 0; this.data = null; }
@@ -210,10 +221,14 @@ const t = sandbox.__t;
 
 // Assets are fired-and-forgotten in the browser; here the shots must wait for
 // them, or every picture is of the fallback.
+const ART_STATE = () => t.ART && t.ART.ready
+  ? `READY (${Object.keys(t.ART.frames).length} frames)`
+  : "NOT LOADED -- shots will show the built-in art";
 if (t.loadAssets) {
   await t.loadAssets();
-  console.log(assetReads ? `assets: ${assetReads} file(s) read from assets/`
-                         : "assets: none (built-in art and synth)");
+  console.log(assetReads
+    ? `assets: ${assetReads} file(s) read, atlas ${ART_STATE()}`
+    : "assets: none (built-in art and synth)");
 }
 
 function parseColor(c) {
@@ -741,3 +756,40 @@ shoot("shot-credits.png", () => {
     console.log(`   walkway tiles ${x0}..${x1} (${x1 - x0 + 1} wide), ninja ${where}`);
   });
 });
+
+// --- 17. standing guard --------------------------------------------------
+// A posted enemy used to hold one pixel-identical pose with empty hands, which
+// for a guard is its entire screen time. Each kind is shown at two points of
+// its own rest cycle: the body on idle/idleB, and the weapon lifting.
+{
+  const W = 520, H = 80, k = 3;
+  rects.length = 0;
+  ctx.fillStyle = "#20242E"; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = "#3A4152"; ctx.fillRect(0, 66, W, 1);
+  t.restart(); t.wakeT = 0;
+  t.cam.x = 0; t.cam.y = 20 * t.TILE - 66;
+  for (const e of t.enemies) e.alive = false;
+  t.hazards.length = 0;
+  let i = 0;
+  for (const kind of ["charger", "rusher", "warden"]) {
+    // Two phases half a rest cycle apart: weapon down, weapon up.
+    for (const phase of [0, 1]) {
+      const e = t.enemies.find(en => en.kind === kind && !en.alive);
+      if (!e) continue;
+      e.alive = true; e.dying = 0; e.ledge = false;
+      e.x = 30 + i * 82; e.y = 20 * t.TILE - t.ENEMY_H;
+      e.facing = 1; e.state = kind === "rusher" ? "wait" : "idle";
+      e.vx = 0; e.walkRate = 0;
+      // One figure on `base`, the next on `idleB`. The alternation IS the idle
+      // motion now, so the picture has to show both frames side by side.
+      e.animTime = phase ? 1 / t.IDLE_FPS : 0;
+      i++;
+    }
+  }
+  console.log(`   ART.ready=${t.ART && t.ART.ready} frames=${t.ART ? Object.keys(t.ART.frames).length : 0}`);
+  console.log("   poses: " + t.enemies.filter(e => e.alive)
+    .map(e => e.kind + "/" + t.enemyPoseOf(e)).join(" "));
+  t.drawEntities();
+  writePNG("shot-rest.png", scale(raster(W, H, rects), W, H, k), W * k, H * k);
+  console.log("wrote shot-rest.png (" + i + " figures, base and idleB)");
+}

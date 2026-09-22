@@ -2053,7 +2053,23 @@ for (const e of t.enemies) if (e !== wk) e.alive = false;
 // wider swing range five tiles left it only 34px of walking, which is less than
 // one four-phase cycle.
 stand(Math.floor(wk.x / t.TILE) - 9);
-check("a standing enemy uses the base pose", t.enemyGait(wk) === "base");
+/* A STANDING ENEMY STILL BREATHES.
+   This asserted "base", full stop, which was true and was the problem: a body
+   holding one pixel-identical pose while the alley moves around it reads as a
+   cut-out, and for a posted guard that is its entire screen time. It alternates
+   base/idleB on its own animTime now -- the player has had exactly this since
+   the beginning. What has to hold is that a standing enemy is on an IDLE frame
+   and never on a walk frame. */
+{
+  const idles = new Set();
+  for (let i = 0; i < 40; i++) { wk.animTime = i * 0.1; idles.add(t.enemyGait(wk)); }
+  check("a standing enemy stays on idle frames",
+        [...idles].every(p => p === "base" || p === "idleB"),
+        [...idles].join(","));
+  check("...and it actually alternates rather than holding one",
+        idles.size === 2, [...idles].join(","));
+  wk.animTime = 0;
+}
 const gaits = new Set();
 // Long enough to cover a full cycle, and a charger does not walk continuously:
 // it stops to swing and then recovers.

@@ -2651,8 +2651,28 @@ function validatePose(name, rows, cols, height) {
    Added before validatePose runs, deliberately: a generated pose is held to the
    same 32x48 contract as a hand-drawn one, and squat() preserving the row count
    is a property worth having checked rather than assumed. */
+/* IDLE B: the second frame of a standing enemy.
+   A body that holds one pixel-identical pose while the alley moves around it
+   reads as a cut-out, and every enemy in the game did that whenever it was not
+   walking or attacking -- which for a posted guard is all the time.
+
+   One row of shift is enough. The content moves down a pixel and the FEET stay
+   where they are, so it is a body settling on its stance rather than the whole
+   sprite sliding; at 44px that is a breath. The player has had exactly this
+   since the beginning (NINJA_IDLE / NINJA_IDLE_B) and the enemies never did.
+
+   Generated, like `coil`, so it costs no art -- and supplied properly by the
+   atlas, which takes a real second frame out of the source Idle animation. */
+function breathe(rows) {
+  const blank = ".".repeat(rows[0].length);
+  const feet = rows.slice(rows.length - 2);
+  const body = rows.slice(0, rows.length - 3);
+  return [blank, ...body, ...feet];
+}
+
 for (const kind in ENEMY_POSES) {
   ENEMY_POSES[kind].coil = squat(ENEMY_POSES[kind].base, 9);
+  ENEMY_POSES[kind].idleB = breathe(ENEMY_POSES[kind].base);
 }
 
 for (const n in NINJA_POSES) validatePose(n, NINJA_POSES[n], NINJA_COLS, NINJA_ROWS);
@@ -5793,7 +5813,11 @@ function poseNameOf(e) {
 // Two-frame gait, offset per enemy by its animTime seed so a group does not
 // march in lockstep. Previously enemies slid along with no footfall at all.
 function enemyGait(e) {
-  return isWalking(e) ? walkFrame(e) : "base";
+  if (isWalking(e)) return walkFrame(e);
+  // Standing still is still two frames. animTime is seeded per enemy in
+  // resetEnemies (i * 0.11), so a row of guards breathes out of step rather
+  // than pulsing as one object.
+  return (Math.floor(e.animTime * IDLE_FPS) % 2) ? "idleB" : "base";
 }
 
 // The LOCAL pose name; drawEntities() looks it up under the enemy's own kind.
@@ -6788,6 +6812,23 @@ function drawHazardZones() {
     ctx.fillRect(x, y, hair * 2, h.h);
   }
 }
+
+/* NO CODE-DRAWN WEAPON AT REST.
+   There was one here, and it was wrong the moment the art arrived. The built-in
+   pixel arrays carry a weapon as a few pixels of steel in the palette; the
+   replacement sprites HOLD one -- the samurai a katana in both hands, the
+   rusher a blade at her hip -- so a stroke drawn over them put a second weapon
+   on every standing enemy. Two blades on a body with two hands.
+
+   The idle motion comes from the POSE instead, which is where it belonged:
+   enemyGait alternates base/idleB, and idleB is a real second frame out of each
+   pack's own idle animation rather than anything this file invents. The one
+   thing a resting enemy needed was to stop being pixel-identical, and the
+   artist already drew that.
+
+   The ATTACK strokes stay. Those are motion -- an arc where the blade travelled
+   over a sprite that cannot animate its own swing -- and they read as blur
+   rather than as a second object. */
 
 function drawEnemyWeapon(e) {
   const dir = e.facing > 0 ? 1 : -1;

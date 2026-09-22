@@ -499,6 +499,9 @@ CAST = [
          outline="#17121C", white="#FFFFFF",
          poses={
              "base":     ("Idle__", 0),
+             # A real second idle frame, so a standing enemy breathes on the
+             # artist's own animation rather than on a generated pixel shift.
+             "idleB":    ("Idle__", 5),
              "walkA":    ("Run__", 3), "walkB": ("Run__", 6),
              "walkC":    ("Run__", 8), "walkD": ("Run__", 0),
              "leap":     ("Jump__", 4),
@@ -548,6 +551,7 @@ CAST = [
          outline="#2A1710", white="#FFFFFF",
          poses={
              "base":  ("Stand", 0),
+             "idleB": ("Stand", 4),
              "walkA": ("Run", 2), "walkB": ("Run", 0),
              "walkC": ("Run", 4), "walkD": ("Run", 1),
              "attack": ("Attack2H", 5),
@@ -574,6 +578,7 @@ CAST = [
          outline="#16220F", white="#FFFFFF",
          poses={
              "base":  ("Stand", 0),
+             "idleB": ("Stand", 4),
              "walkA": ("Run", 2), "walkB": ("Run", 0),
              "walkC": ("Run", 4), "walkD": ("Run", 1),
              "aim":   ("Alert1H", 0),
