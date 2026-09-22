@@ -64,7 +64,7 @@ USAGE
     node frontend/shot.mjs                           # then LOOK at it
 """
 
-import os, sys, zlib, struct, json, urllib.request, zipfile, re
+import os, sys, zlib, struct, json, urllib.request, zipfile, re, hashlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FRONTEND = os.path.dirname(HERE)
@@ -79,7 +79,50 @@ PACKS = {
     # Ninja, SamuraiHeavy and SamuraiLight -- which is what finally retired the
     # European knight that used to stand in for the heavy.
     "fh-samurai":        "https://opengameart.org/sites/default/files/Samurai_1.zip",
+    "kenney-rpg": "https://kenney.nl/media/pages/assets/rpg-audio/"
+                  "8e99002d76-1677590336/kenney_rpg-audio.zip",
+    "kenney-impact": "https://kenney.nl/media/pages/assets/impact-sounds/"
+                     "87b4ddecda-1677589768/kenney_impact-sounds.zip",
+    "kenney-interface": "https://kenney.nl/media/pages/assets/interface-sounds/"
+                        "fa43c1dd4d-1677589452/kenney_interface-sounds.zip",
 }
+
+# THE SOUND EFFECTS.
+# One file per cue, picked from Kenney's CC0 packs against the descriptions in
+# assets/README.md rather than by browsing -- that file says what each cue has
+# to BE, and several of the choices fall straight out of it:
+#
+#   bladeKill   "the built-in is a struck bell against the swing's noise", so a
+#               struck bell is the literal answer
+#   bump        "a dull body thud; it must never sound like taking damage"
+#   dryFire     "keep it tiny and unpitched, or it reads as an action"
+#   dash        cloth and air, no pitch -- it fires on a key that may be held
+#               down through a whole alley
+#
+# Two cues carry hard DURATION contracts from the same file, and build() checks
+# them rather than trusting this table: `death` must stay under ~0.35s or it
+# drones under the freeze frame, and `deathSting` has to resolve inside the
+# ~1.05s freeze because the music is cut dead and it is alone in the mix.
+#
+# NOT AUDITIONED. There is no audio device on the machine this was built on, so
+# these are chosen by name, by pack and by measured length. The lengths are
+# verified; the timbres are the packs' own descriptions taken on trust.
+SFX = {
+    "slash":      ("kenney-rpg",       "Audio/knifeSlice.ogg"),
+    "throw":      ("kenney-rpg",       "Audio/drawKnife1.ogg"),
+    "dash":       ("kenney-rpg",       "Audio/cloth2.ogg"),
+    "pickup":     ("kenney-rpg",       "Audio/metalClick.ogg"),
+    "kill":       ("kenney-impact",    "Audio/impactPunch_medium_000.ogg"),
+    "bladeKill":  ("kenney-impact",    "Audio/impactBell_heavy_000.ogg"),
+    "bump":       ("kenney-impact",    "Audio/impactSoft_medium_000.ogg"),
+    "death":      ("kenney-impact",    "Audio/impactMetal_heavy_000.ogg"),
+    "dryFire":    ("kenney-interface", "Audio/click_001.ogg"),
+    "flag":       ("kenney-interface", "Audio/confirmation_001.ogg"),
+    "deathSting": ("kenney-interface", "Audio/glass_004.ogg"),
+}
+
+# The contracts from assets/README.md, enforced instead of remembered.
+SFX_MAX = {"death": 0.35, "deathSting": 1.05}
 
 # Per pack: the licence that travels with it, and whether that licence obliges
 # the GAME to carry a credit. CC-BY does; CC0 does not. CREDITS_REQUIRED is read
@@ -108,6 +151,12 @@ MUSIC = dict(
 )
 
 LICENCES = {
+    "kenney-rpg":       dict(name="CC0 / public domain", author="Kenney",
+                             url="https://kenney.nl/assets/rpg-audio", credit=False),
+    "kenney-impact":    dict(name="CC0 / public domain", author="Kenney",
+                             url="https://kenney.nl/assets/impact-sounds", credit=False),
+    "kenney-interface": dict(name="CC0 / public domain", author="Kenney",
+                             url="https://kenney.nl/assets/interface-sounds", credit=False),
     "ninjaadventurenew": dict(name="CC0 / public domain", author="gameart2d.com",
                               url="https://www.gameart2d.com/license.html", credit=False),
     "ninjagirlnew":      dict(name="CC0 / public domain", author="gameart2d.com",
@@ -573,6 +622,44 @@ def fetch():
         sys.stderr.write("  unpacked %s\n" % name)
 
 
+def ogg_seconds(path):
+    """Duration of an Ogg Vorbis file, from the identification header's sample
+    rate and the last page's granule position. Enough to hold a cue to a
+    contract without decoding a single sample."""
+    d = open(path, "rb").read()
+    if d[:4] != b"OggS":
+        raise SystemExit("%s is not an Ogg stream" % path)
+    i = d.index(b"\x01vorbis")
+    rate = struct.unpack("<I", d[i + 12:i + 16])[0]
+    j = d.rindex(b"OggS")
+    gran = struct.unpack("<Q", d[j + 6:j + 14])[0]
+    return gran / float(rate)
+
+
+def build_sfx():
+    """Copy each chosen cue out of its pack and into assets/, named by cue.
+
+    Named by CUE and not by source file on purpose: the manifest maps cue to
+    filename, and a filename that says what the sound IS survives swapping the
+    pack it came from."""
+    out = {}
+    for cue, (pack, rel) in sorted(SFX.items()):
+        src = os.path.join(CACHE, pack, rel)
+        if not os.path.exists(src):
+            raise SystemExit("missing sound %s" % src)
+        secs = ogg_seconds(src)
+        cap = SFX_MAX.get(cue)
+        if cap and secs > cap:
+            raise SystemExit(
+                "cue '%s' is %.3fs; assets/README.md caps it at %.2fs (%s)"
+                % (cue, secs, cap, rel))
+        name = "sfx-%s.ogg" % cue
+        with open(src, "rb") as f, open(os.path.join(ASSETS, name), "wb") as g:
+            g.write(f.read())
+        out[cue] = (name, secs, pack, rel)
+    return out
+
+
 def unpack(zp, out):
     """Extract a downloaded zip, refusing any member that would land outside the
     destination.
@@ -598,6 +685,10 @@ def unpack(zp, out):
 def build():
     fetch()
     fetch_music()
+    sfx = build_sfx()
+    for cue in sorted(sfx):
+        name, secs, pack, rel = sfx[cue]
+        sys.stderr.write("  %-11s %-34s %5.3fs\n" % (cue, rel.split("/")[-1], secs))
     os.makedirs(ASSETS, exist_ok=True)
     frames, meta = {}, {}
     for ch in CAST:
@@ -673,9 +764,26 @@ def build():
         oy += sh_h
     encode(os.path.join(ASSETS, "sprites.png"), AW, AH, atlas)
 
+    # A CONTENT VERSION, for cache busting.
+    # manifest.json is fetched no-cache, but the atlas is loaded through an
+    # Image whose src the browser caches like any other picture -- so a rebuild
+    # served a FRESH manifest against a STALE sprites.png, and the title screen
+    # came back with the previous cast on it after a refresh. The loader appends
+    # this to the atlas and audio URLs.
+
+    # A content hash rather than a timestamp: it changes when the bytes change
+    # and not when the script is merely re-run, so a rebuild that produces
+    # identical art keeps the cached copy. 
+    ver = hashlib.sha1()
+    for f in ["sprites.png", MUSIC["file"]] + ["sfx-%s.ogg" % c for c in sorted(SFX)]:
+        p = os.path.join(ASSETS, f)
+        if os.path.exists(p):
+            ver.update(open(p, "rb").read())
+
     manifest = {
         "atlas": "sprites.png",
-        "audio": {"music": MUSIC["file"]},
+        "version": ver.hexdigest()[:12],
+        "audio": dict({c: sfx[c][0] for c in sfx}, music=MUSIC["file"]),
         "frames": table,
         "meta": {
             "generator": "frontend/tools/pack_assets.py",
@@ -691,6 +799,9 @@ def build():
             "bodyPx": BODY_PX,
             "music": {k: MUSIC[k] for k in
                       ("file", "title", "author", "licence", "page")},
+            "sfx": {c: {"file": sfx[c][0], "seconds": round(sfx[c][1], 3),
+                        "source": sfx[c][3], "pack": sfx[c][2]}
+                    for c in sorted(sfx)},
             "characters": meta,
         },
     }
@@ -701,7 +812,8 @@ def build():
 
 
 def clean():
-    for f in ("sprites.png", "manifest.json", MUSIC["file"]):
+    for f in (["sprites.png", "manifest.json", MUSIC["file"]]
+              + ["sfx-%s.ogg" % c for c in SFX]):
         p = os.path.join(ASSETS, f)
         if os.path.exists(p):
             os.remove(p); sys.stderr.write("removed assets/%s\n" % f)

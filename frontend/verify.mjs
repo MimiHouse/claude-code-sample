@@ -44,7 +44,8 @@ globalThis.__t = {
   COVER_H, SLASH_RANGE, SLASH_TIME, SLASH_HIT, SLASH_WIND,
   SLASH_W, SLASH_TOP, SLASH_BOT, CHG_MELEE, CHG_HIT_W,
   BUMP_VX, BUMP_VY, BUMP_GRACE, ARC_CY, ARC_RY, ARC_THICK,
-  CREDITS, BTN_CREDITS, BTN_BACK, drawCredits,
+  CREDITS, BTN_CREDITS, BTN_BACK, drawCredits, drawLoading,
+  assetUrl, get assetVersion() { return assetVersion; }, BOOT_WAIT,
   ARC_LEAD, ARC_NEAR, ARC_MID, ARC_TAIL,
   BULLET_H, BULLET_W, BULLET_Y_OFF, BULLET_SPEED,
   MUSIC_MELODY, MUSIC_CHORDS, MUSIC_BPM, MUSIC_BAR, MUSIC_LEN,
@@ -92,6 +93,10 @@ globalThis.__t = {
   get hitFreeze() { return hitFreeze; },
   get flash() { return flash; },
   get mode() { return mode; },
+  // Settable for the tests: several of them have to put the game on a screen
+  // the player reaches through a menu, and driving the menu to get there
+  // would test the menu instead of the thing under test.
+  set mode(v) { mode = v; },
   get dyingT() { return dyingT; },
   get lives() { return lives; },
   get playTime() { return playTime; },
@@ -225,10 +230,12 @@ const fakeStorage = {
 let assetFixture = null;
 const fakeFetch = async (url) => {
   if (!assetFixture) return { ok: false, status: 404 };
-  if (String(url).endsWith("manifest.json")) {
+  if (String(url).split("?")[0].endsWith("manifest.json")) {
     return { ok: true, json: async () => assetFixture.manifest };
   }
-  const file = String(url).slice(String(url).lastIndexOf("/") + 1);
+  // Strip the cache-busting query, as any server would. Without this the
+  // loader's "?v=..." lands inside the filename and every cue 404s.
+  const file = String(url).split("?")[0].slice(String(url).split("?")[0].lastIndexOf("/") + 1);
   if (assetFixture.audioFiles && assetFixture.audioFiles.has(file)) {
     return { ok: true, arrayBuffer: async () => new ArrayBuffer(16) };
   }
@@ -2303,6 +2310,50 @@ check("...and offers credits beside it",
       t.buttonsFor("title").length === 2 &&
       t.buttonsFor("title")[1] === t.BTN_CREDITS);
 
+/* NOTHING SIMULATES BEHIND AN OVERLAY.
+   "title" was on this list from the start. "credits" was not, and fell through
+   to the play branch -- so opening the credits quietly started the alley behind
+   the overlay: enemies woke, the wave timer ran, the run clock ticked and the
+   ninja walked off the spawn tile. "loading" is new and would have had the same
+   hole. The clock itself must still run, because the alley behind these screens
+   is meant to be alive. */
+for (const m of ["title", "credits", "loading"]) {
+  t.restart();
+  t.mode = m;
+  t.ninja.x = 8 * t.TILE; t.ninja.y = 20 * t.TILE - t.BODY_H;
+  const x0 = t.ninja.x, y0 = t.ninja.y, c0 = t.clock;
+  const alive0 = t.enemies.filter(e => e.alive).length;
+  const pt0 = t.playTime;
+  for (let i = 0; i < 90; i++) t.update(t.STEP);
+  check(`"${m}" does not move the world`,
+        t.ninja.x === x0 && t.ninja.y === y0 &&
+        t.enemies.filter(e => e.alive).length === alive0,
+        `x ${x0}->${t.ninja.x.toFixed(0)}, foes ${alive0}->${t.enemies.filter(e => e.alive).length}`);
+  check(`"${m}" does not charge the run clock`, t.playTime === pt0,
+        `${pt0.toFixed(2)} -> ${t.playTime.toFixed(2)}`);
+  check(`"${m}" still runs the animation clock`, t.clock > c0,
+        `${c0.toFixed(2)} -> ${t.clock.toFixed(2)}`);
+}
+t.restart(); t.mode = "title";
+
+/* The boot wait needs BOTH a fetch and a timer: without fetch there is nothing
+   to load, and without a timer the wait is unbounded -- a loading screen that
+   never clears is a worse failure than the flash of built-in art it exists to
+   prevent. This sandbox has fetch and no setTimeout, which is exactly the
+   file:// case, and it must boot straight to the title. */
+check("with no timer to bound it, the boot does not wait",
+      bootMode === "title", `booted in "${bootMode}"`);
+check("the boot wait is bounded and short", t.BOOT_WAIT > 0 && t.BOOT_WAIT <= 4,
+      `${t.BOOT_WAIT}s`);
+{
+  // The loading screen has to draw something, and not the HUD.
+  rects.length = 0;
+  t.mode = "loading"; t.render();
+  const marks = rects.length;
+  t.mode = "title";
+  check("the loading screen paints", marks > 50, `${marks} marks`);
+}
+
 /* THE CC-BY OBLIGATION, checked rather than trusted.
    Two of the four character packs are CC-BY 3.0, which asks for attribution in
    the work. assets/README.md required a credits screen before any CC-BY asset
@@ -2343,6 +2394,44 @@ check("...and offers credits beside it",
           JSON.stringify(cman.audio));
   } else {
     console.log("  SKIP  no music asset; the synthesised loop is what plays");
+  }
+
+  /* THE SOUND EFFECTS.
+     Every cue the game plays is discovered by scanning the game's own source
+     for playCue() calls rather than from a list kept beside it -- a list would
+     be one more thing to forget to update, and the failure mode is silent: the
+     cue simply falls back to its synthesised version and nobody notices the
+     asset was never wired up. */
+  {
+    const cues = [...new Set([...source.matchAll(/playCue\("([A-Za-z]+)"/g)]
+                              .map(m => m[1]))].sort();
+    check("the game plays a recognisable set of cues", cues.length >= 10,
+          cues.join(" "));
+    const declared = (cman && cman.audio) || {};
+    const uncovered = cues.filter(c => !declared[c]);
+    check("every cue the game plays has a file behind it",
+          uncovered.length === 0,
+          uncovered.length ? "falling back to synth: " + uncovered.join(" ")
+                           : `${cues.length} cues`);
+    /* Two cues have hard duration limits written into assets/README.md, and the
+       reasons are specific: `death` over ~0.35s drones under the freeze frame,
+       and `deathSting` has to RESOLVE inside the ~1.05s freeze because the
+       music is cut dead and the sting is alone in the mix. The pipeline
+       measures what it shipped; this holds it to the figures. */
+    const sfx = (cman && cman.meta && cman.meta.sfx) || null;
+    if (sfx) {
+      check("the death cue is short enough not to drone under the freeze",
+            sfx.death && sfx.death.seconds <= 0.35,
+            `${sfx.death && sfx.death.seconds}s`);
+      check("the death sting resolves inside the freeze",
+            sfx.deathSting && sfx.deathSting.seconds <= 1.05,
+            `${sfx.deathSting && sfx.deathSting.seconds}s`);
+      check("no cue is long enough to pile up on itself",
+            Object.values(sfx).every(v => v.seconds <= 1.6),
+            Object.entries(sfx).sort((a, b) => b[1].seconds - a[1].seconds)[0].join("="));
+    }
+    check("the sound packs' author is credited",
+          credited.indexOf("KENNEY") >= 0);
   }
 }
 // Nothing may simulate on the title screen...
@@ -4132,11 +4221,25 @@ assetFixture = {
       "bad/zeroSize":   { x: 0,  y: 0,  w: 0,  h: 48 },    // degenerate
       "bad/null":       null
     },
-    audio: { kill: "kill.ogg", music: "loop.ogg" }
+    audio: { kill: "kill.ogg", music: "loop.ogg" },
+    version: "deadbeef1234"
   },
   audioFiles: new Set(["kill.ogg", "loop.ogg"])
 };
 await t.loadAssets();
+
+/* CACHE BUSTING. manifest.json is fetched no-cache, but the atlas goes through
+   an Image whose src the browser caches like any other picture -- so a rebuild
+   served a fresh manifest describing frames inside a STALE sprites.png, and a
+   refresh of the title screen came back with the PREVIOUS cast on it. Reported
+   as a bug, and it was exactly that. */
+check("the manifest's version is adopted", t.assetVersion === "deadbeef1234",
+      `"${t.assetVersion}"`);
+check("asset URLs carry it", t.assetUrl("sprites.png") ===
+      "assets/sprites.png?v=deadbeef1234", t.assetUrl("sprites.png"));
+check("...and the atlas was actually requested with it",
+      String(t.ART.image && t.ART.image.src).indexOf("?v=deadbeef1234") > 0,
+      String(t.ART.image && t.ART.image.src));
 
 check("a declared atlas loads", t.ART.ready === true);
 check("valid frames are taken",

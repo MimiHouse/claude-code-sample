@@ -202,6 +202,46 @@ Reliable CC0 sources for this art style and scale:
 | `sprites.png` | built by `tools/pack_assets.py` from the packs below | CC0 **and CC-BY 3.0** — see below | 2026-09-22 |
 | `manifest.json` | built by `tools/pack_assets.py` | n/a (generated) | 2026-09-22 |
 | `music.ogg` | [C64 Uptempo Chiptune](https://opengameart.org/content/6-genuinely-c64-soundtracks-released-as-public-domain-may-2017) by Skrjablin | CC0 / public domain | 2026-09-22 |
+| `sfx-*.ogg` (11 files) | Kenney's [RPG Audio](https://kenney.nl/assets/rpg-audio), [Impact Sounds](https://kenney.nl/assets/impact-sounds) and [Interface Sounds](https://kenney.nl/assets/interface-sounds) | CC0 / public domain | 2026-09-22 |
+
+### Sound cues
+
+One file per cue, named by the cue so that swapping the pack it came from does
+not rename the asset. Chosen against the **Audio cues** table below rather than
+by browsing — several fall straight out of it: `bladeKill` is a struck bell
+because that is what the built-in is, `bump` is a dull soft impact because it
+"must never sound like taking damage", `dryFire` is a 100ms unpitched click, and
+`dash` is cloth and air.
+
+| File | Source file | Pack | Length |
+| --- | --- | --- | --- |
+| `sfx-bladeKill.ogg` | `impactBell_heavy_000.ogg` | Impact Sounds | 1.480s |
+| `sfx-bump.ogg` | `impactSoft_medium_000.ogg` | Impact Sounds | 0.118s |
+| `sfx-dash.ogg` | `cloth2.ogg` | RPG Audio | 0.415s |
+| `sfx-death.ogg` | `impactMetal_heavy_000.ogg` | Impact Sounds | 0.168s |
+| `sfx-deathSting.ogg` | `glass_004.ogg` | Interface Sounds | 0.692s |
+| `sfx-dryFire.ogg` | `click_001.ogg` | Interface Sounds | 0.100s |
+| `sfx-flag.ogg` | `confirmation_001.ogg` | Interface Sounds | 0.290s |
+| `sfx-kill.ogg` | `impactPunch_medium_000.ogg` | Impact Sounds | 0.431s |
+| `sfx-pickup.ogg` | `metalClick.ogg` | RPG Audio | 0.446s |
+| `sfx-slash.ogg` | `knifeSlice.ogg` | RPG Audio | 0.600s |
+| `sfx-throw.ogg` | `drawKnife1.ogg` | RPG Audio | 0.400s |
+
+Kenney's licence file states: *"License (Creative Commons Zero, CC0) ... You may
+use these assets in personal and commercial projects. Credit (Kenney or
+www.kenney.nl) would be nice but is not mandatory."* Credit is given.
+
+**Two cues have hard length limits and the pipeline enforces them**, rather than
+leaving them as prose here: `death` must stay under 0.35s or it drones under the
+freeze frame, and `deathSting` has to resolve inside the ~1.05s freeze because
+the music is cut dead and the sting is alone in the mix. `pack_assets.py` reads
+each file's duration out of its Ogg headers and refuses to build if either is
+over. The suite then re-checks the figures the build recorded.
+
+**Not auditioned.** There is no audio device on the machine this was assembled
+on. The lengths are measured; the timbres are the packs' own descriptions taken
+on trust. If a cue is wrong, it is wrong for that reason, and swapping it is one
+line in `SFX` in `pack_assets.py`.
 
 ### Character packs
 

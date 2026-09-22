@@ -1,7 +1,18 @@
 {
  "atlas": "sprites.png",
  "audio": {
-  "music": "music.ogg"
+  "bladeKill": "sfx-bladeKill.ogg",
+  "bump": "sfx-bump.ogg",
+  "dash": "sfx-dash.ogg",
+  "death": "sfx-death.ogg",
+  "deathSting": "sfx-deathSting.ogg",
+  "dryFire": "sfx-dryFire.ogg",
+  "flag": "sfx-flag.ogg",
+  "kill": "sfx-kill.ogg",
+  "music": "music.ogg",
+  "pickup": "sfx-pickup.ogg",
+  "slash": "sfx-slash.ogg",
+  "throw": "sfx-throw.ogg"
  },
  "frames": {
   "charger/attack": {
@@ -409,10 +420,79 @@
     "url": "https://www.gameart2d.com/license.html"
    }
   },
+  "sfx": {
+   "bladeKill": {
+    "file": "sfx-bladeKill.ogg",
+    "pack": "kenney-impact",
+    "seconds": 1.48,
+    "source": "Audio/impactBell_heavy_000.ogg"
+   },
+   "bump": {
+    "file": "sfx-bump.ogg",
+    "pack": "kenney-impact",
+    "seconds": 0.118,
+    "source": "Audio/impactSoft_medium_000.ogg"
+   },
+   "dash": {
+    "file": "sfx-dash.ogg",
+    "pack": "kenney-rpg",
+    "seconds": 0.415,
+    "source": "Audio/cloth2.ogg"
+   },
+   "death": {
+    "file": "sfx-death.ogg",
+    "pack": "kenney-impact",
+    "seconds": 0.168,
+    "source": "Audio/impactMetal_heavy_000.ogg"
+   },
+   "deathSting": {
+    "file": "sfx-deathSting.ogg",
+    "pack": "kenney-interface",
+    "seconds": 0.692,
+    "source": "Audio/glass_004.ogg"
+   },
+   "dryFire": {
+    "file": "sfx-dryFire.ogg",
+    "pack": "kenney-interface",
+    "seconds": 0.1,
+    "source": "Audio/click_001.ogg"
+   },
+   "flag": {
+    "file": "sfx-flag.ogg",
+    "pack": "kenney-interface",
+    "seconds": 0.29,
+    "source": "Audio/confirmation_001.ogg"
+   },
+   "kill": {
+    "file": "sfx-kill.ogg",
+    "pack": "kenney-impact",
+    "seconds": 0.431,
+    "source": "Audio/impactPunch_medium_000.ogg"
+   },
+   "pickup": {
+    "file": "sfx-pickup.ogg",
+    "pack": "kenney-rpg",
+    "seconds": 0.446,
+    "source": "Audio/metalClick.ogg"
+   },
+   "slash": {
+    "file": "sfx-slash.ogg",
+    "pack": "kenney-rpg",
+    "seconds": 0.6,
+    "source": "Audio/knifeSlice.ogg"
+   },
+   "throw": {
+    "file": "sfx-throw.ogg",
+    "pack": "kenney-rpg",
+    "seconds": 0.4,
+    "source": "Audio/drawKnife1.ogg"
+   }
+  },
   "sources": [
    "fh-samurai",
    "ninjaadventurenew",
    "ninjagirlnew"
   ]
- }
+ },
+ "version": "6b7f426858a1"
 }

@@ -2590,17 +2590,18 @@ const FOE_NAMES = { charger: "IRONCLAD", rusher: "SHADE", warden: "GLAIVE" };
 const CREDITS = [
   [0, "CHARACTER ART", "#FFE45E"],
   [1, "SAMURAI HEAVY / SAMURAI LIGHT", "#C9D2E0"],
-  [2, "RAGEWORTT - CC BY 3.0", "#9FD0FF"],
-  [2, "OPENGAMEART.ORG", "#8E9AAD"],
+  [2, "RAGEWORTT - CC BY 3.0 - OPENGAMEART", "#9FD0FF"],
   [1, "NINJA ADVENTURE / NINJA GIRL", "#C9D2E0"],
   [2, "GAMEART2D.COM - CC0", "#9FD0FF"],
   [0, "MUSIC", "#FFE45E"],
   [1, "C64 UPTEMPO CHIPTUNE", "#C9D2E0"],
-  [2, "SKRJABLIN - CC0", "#9FD0FF"],
-  [2, "OPENGAMEART.ORG", "#8E9AAD"],
+  [2, "SKRJABLIN - CC0 - OPENGAMEART", "#9FD0FF"],
+  [0, "SOUND EFFECTS", "#FFE45E"],
+  [1, "RPG, IMPACT AND INTERFACE AUDIO", "#C9D2E0"],
+  [2, "KENNEY - CC0 - KENNEY.NL", "#9FD0FF"],
   [0, "EVERYTHING ELSE", "#FFE45E"],
   [1, "CODE, ART PIPELINE, BACKGROUND,", "#C9D2E0"],
-  [1, "EFFECTS, SOUND, FONT, SYNTH BGM", "#C9D2E0"],
+  [1, "EFFECTS, FONT, SYNTH BGM AND SFX", "#C9D2E0"],
   [2, "THIS REPOSITORY", "#8E9AAD"],
   [0, "FULL LICENCE INVENTORY", "#FFE45E"],
   [1, "FRONTEND/ASSETS/README.MD", "#8E9AAD"]
@@ -3946,6 +3947,21 @@ function pumpMusic() {
 
 const ASSET_BASE = "assets/";
 const ART = { image: null, frames: {}, ready: false };
+/* The manifest's content version, appended to every asset URL below.
+
+   manifest.json is fetched no-cache, but the atlas goes through an Image whose
+   src the browser caches like any other picture. So a rebuild served a FRESH
+   manifest describing frames inside a STALE sprites.png, and a refresh of the
+   title screen came back with the PREVIOUS cast standing on it -- reported as
+   "the old characters are still there after a refresh", and it was exactly
+   that.
+
+   A content hash, not a timestamp: rebuilding without changing the art keeps
+   the cached copy, and changing one pixel invalidates it. */
+let assetVersion = "";
+function assetUrl(name) {
+  return ASSET_BASE + name + (assetVersion ? "?v=" + assetVersion : "");
+}
 const CUES = Object.create(null);          // cue name -> decoded AudioBuffer
 let musicSample = null;                    // looping source, when supplied
 
@@ -3958,6 +3974,7 @@ async function loadAssets() {
     manifest = await res.json();
   } catch (err) { return; }
   if (!manifest || typeof manifest !== "object") return;
+  if (typeof manifest.version === "string") assetVersion = manifest.version;
   await Promise.all([loadArt(manifest), loadCues(manifest)]);
 }
 
@@ -3998,7 +4015,7 @@ function loadArt(manifest) {
       resolve();
     };
     img.onerror = () => resolve();         // atlas missing: built-ins stay
-    img.src = ASSET_BASE + atlas;
+    img.src = assetUrl(atlas);
   });
 }
 
@@ -4010,7 +4027,7 @@ async function loadCues(manifest) {
   if (!actx) return;
   await Promise.all(Object.keys(files).map(async (cue) => {
     try {
-      const res = await fetch(ASSET_BASE + files[cue], { cache: "no-cache" });
+      const res = await fetch(assetUrl(files[cue]), { cache: "no-cache" });
       if (!res.ok) return;
       CUES[cue] = await actx.decodeAudioData(await res.arrayBuffer());
     } catch (err) { /* that cue keeps its synthesised version */ }
@@ -4104,6 +4121,7 @@ const BTN_BACK    = { x: 246, y: VIEW_H - 46, w: 148, h: 26, label: "BACK" };
 let hover = null;                 // button under the pointer, for the highlight
 
 function buttonsFor(m) {
+  if (m === "loading") return [];
   if (m === "title") return [BTN_START, BTN_CREDITS];
   if (m === "credits") return [BTN_BACK];
   if (m === "paused") return [BTN_RESUME, BTN_RESTART];
@@ -4157,6 +4175,10 @@ addEventListener("keydown", (e) => {
   // The debug toggle is a development key, so it answers from any screen rather
   // than being shadowed by whichever menu happens to be up.
   if (e.code === "KeyD") { showDebug = !showDebug; return; }
+
+  // Nothing but the debug and mute keys works while the boot is waiting. A
+  // buffered Z here used to land a jump on the first frame of play.
+  if (mode === "loading") return;
 
   // The menus own the rest of the keyboard before the ninja does, so Z cannot
   // buffer a jump on the title screen and land it the moment play begins.
@@ -5329,9 +5351,18 @@ function update(dt) {
   // A pause is an absolute stop -- not even the background moves, so the frame
   // you paused on is the frame you come back to.
   if (mode === "paused") return;
-  // The title screen is the opposite: nothing simulates, but the clock runs so
-  // the alley behind the logo is alive and the ninja keeps breathing.
-  if (mode === "title") { clock += dt; return; }
+  /* The title, the credits and the boot wait all behave the same way: nothing
+     simulates, but the clock runs so the alley behind them stays alive and the
+     ninja keeps breathing.
+
+     "credits" was missing from this list and fell through to the play branch,
+     so opening the credits from the title quietly started the alley -- enemies
+     woke, waves spawned, the run clock ticked, and the ninja walked off the
+     spawn tile behind a full-screen overlay. */
+  if (mode === "title" || mode === "credits" || mode === "loading") {
+    clock += dt;
+    return;
+  }
   clock += dt;      // keeps the alley alive even while standing still
   updateParticles(dt);
   if (mode === "clear") { flash = Math.max(0, flash - dt); return; }
@@ -7308,6 +7339,26 @@ function drawButton(b, scale) {
              on ? "#141018" : "#FFE45E", px);
 }
 
+/* Deliberately almost nothing: the wordmark, a bar, and the reason it is here.
+   A loading screen that animates invites the player to look at it, and this one
+   is meant to be gone in a few frames. The alley is already drawn behind it. */
+function drawLoading() {
+  ctx.fillStyle = "rgba(6,8,13,0.86)";
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  const t1 = "NEON SHINOBI";
+  drawTextHD(t1, (VIEW_W - textWidthHD(t1, 6)) / 2, 148, "#FFE45E", 6);
+  const t2 = "LOADING ASSETS";
+  drawTextHD(t2, (VIEW_W - textWidthHD(t2, 2)) / 2, 188, "#8E9AAD", 2);
+  // A sweep rather than a percentage: the real figure is the atlas decoding,
+  // which reports nothing, and a fake percentage is a lie with extra steps.
+  const w = 180, x0 = (VIEW_W - w) / 2, hair = 1 / RENDER_SCALE;
+  ctx.fillStyle = "rgba(255,228,94,0.20)";
+  ctx.fillRect(x0, 204, w, hair * 2);
+  const k = (clock * 0.9) % 1;
+  ctx.fillStyle = "#FFE45E";
+  ctx.fillRect(x0 + Math.round((w - 40) * k), 204, 40, hair * 2);
+}
+
 function drawCredits() {
   ctx.fillStyle = "rgba(6,8,13,0.90)";
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
@@ -7321,11 +7372,16 @@ function drawCredits() {
   // mixed-length lines has no edge for the eye to follow down.
   const x0 = 96;
   CREDITS.forEach(([indent, text, col], i) => {
-    // Pitch derived from the list length rather than fixed: the list grew from
-    // twelve lines to sixteen when the music became an asset, and a fixed 16px
-    // pitch ran the last two entries through the bottom rule.
-    const pitch = Math.min(16, Math.floor((VIEW_H - 68 - 74) / CREDITS.length));
-    drawTextHD(text, x0 + indent * 14, 72 + i * pitch, col, indent >= 2 ? 2 : 3);
+    /* Pitch derived from the list length, and only the HEADINGS are large.
+       The list has grown twice -- twelve lines, then sixteen when the music
+       became an asset, then twenty when the sound did -- and each time a fixed
+       pitch either ran off the bottom rule or, at twenty, set a 10px pitch
+       under 10.5px glyphs and overlapped every row. Sizing the body text down
+       to 2 is what actually buys the room; the pitch then only has to fit the
+       headings. */
+    const px = indent === 0 ? 3 : 2;
+    const pitch = Math.min(13, Math.floor((VIEW_H - 68 - 74) / CREDITS.length));
+    drawTextHD(text, x0 + indent * 14, 72 + i * pitch, col, px);
   });
   drawButton(BTN_BACK, 2);
 }
@@ -7512,12 +7568,14 @@ function renderWorld() {
   // No HUD on the title screen: nothing it reports is meaningful yet. Nor on
   // the credits, which is a page to read and had the ammo plate over its first
   // two lines.
-  if (mode !== "title" && mode !== "gameover" && mode !== "credits") {
+  if (mode !== "title" && mode !== "gameover" && mode !== "credits" &&
+      mode !== "loading") {
     drawHud();
     if (showDebug) drawDebug();
   }
 
-  if (mode === "title") drawTitle();
+  if (mode === "loading") drawLoading();
+  else if (mode === "title") drawTitle();
   else if (mode === "credits") drawCredits();
   else if (mode === "gameover") drawGameOver();
   else if (mode === "paused") drawPause();
@@ -7604,10 +7662,39 @@ function frame(now) {
 }
 
 restart();
-mode = "title";     // the game opens on the title screen, not mid-alley
-// Fired and forgotten: the game is already playable, and anything that loads
-// simply replaces a built-in the next time it is drawn or played.
-loadAssets();
+
+/* THE FIRST PAINT WAITS FOR THE ASSETS -- but never for long.
+   Firing loadAssets() and painting immediately meant the first frames drew the
+   built-in pixel arrays and then swapped to the atlas a moment later, which on
+   the title screen is a visible flash of a different character. So the boot
+   holds on a "loading" screen until the load settles.
+
+   It holds on a DEADLINE as well, because a hang is worse than a flash: a slow
+   or unreachable asset must not leave the game on a loading screen. And when
+   there is no fetch at all -- file://, or the headless harness -- there is
+   nothing to wait for, so the transition is synchronous and the game still
+   boots straight onto the title exactly as it used to. */
+const BOOT_WAIT = 2.5;              // seconds before the wait gives up
+let bootReady = false;
+function finishBoot() {
+  if (bootReady) return;
+  bootReady = true;
+  mode = "title";
+}
+
+/* BOTH are required, and that is the invariant rather than an accident of the
+   host: without fetch there is nothing to load, and without a timer there is no
+   way to bound the wait -- and an unbounded wait on a loading screen is a worse
+   failure than the flash it was added to prevent. Either missing means boot
+   straight to the title, which is what file:// and the headless harness do. */
+if (typeof fetch !== "function" || typeof setTimeout !== "function") {
+  mode = "title";
+  bootReady = true;
+} else {
+  mode = "loading";
+  loadAssets().then(finishBoot, finishBoot);
+  setTimeout(finishBoot, BOOT_WAIT * 1000);
+}
 requestAnimationFrame(frame);
 </script>
 </body>

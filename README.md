@@ -63,6 +63,20 @@ Fantasy Heroes 팩 하나가 `SamuraiHeavy`와 `SamuraiLight`를 동시에 주�
 |---|---|---|---|
 | `assets/sprites.png` (60KB) | 39프레임 캐릭터 아틀라스 | 팩 3종 | CC0 + **CC-BY 3.0** |
 | `assets/music.ogg` (1.9MB) | C64 Uptempo Chiptune, 152초 루프 | Skrjablin / OpenGameArt | CC0 |
+| `assets/sfx-*.ogg` (11개) | 효과음 11큐 | Kenney RPG/Impact/Interface | CC0 |
+
+**효과음 큐는 문서에서 골랐습니다.** `assets/README.md`가 각 큐가 *무엇이어야 하는지*를
+적어두고 있어서, 여러 개는 거기서 바로 도출됩니다 — `bladeKill`은 "내장이 스윙 노이즈에 맞선
+타종"이니 실제 종소리, `bump`는 "절대 피해를 입는 소리로 들려선 안 되는 둔탁한 몸통 충격",
+`dryFire`는 100ms 무음정 클릭, `dash`는 천과 공기.
+
+**길이 규약 2건은 파이프라인이 강제합니다.** `death`는 0.35초를 넘으면 프리즈 프레임 아래에서
+웅웅거리고, `deathSting`은 음악이 끊긴 채 혼자 남으므로 ~1.05초 프리즈 안에 해결돼야 합니다.
+`pack_assets.py`가 Ogg 헤더에서 길이를 읽어 초과 시 **빌드를 거부**하고, 단정이 빌드가 기록한
+수치를 다시 검사합니다.
+
+**들어보지는 못했습니다.** 이 기계에는 오디오 장치가 없습니다. 길이는 측정했고 음색은 팩의
+설명을 신뢰한 것입니다. 큐가 틀렸다면 그 이유이고, 교체는 `pack_assets.py`의 `SFX` 한 줄입니다.
 
 `frontend/tools/pack_assets.py`가 전부 받아서 게임 자체 팔레트로 리컬러해 굽습니다.
 라이선스·출처·**거부한 후보**는 `frontend/assets/README.md`의 장부에 기록돼 있습니다.
@@ -287,13 +301,33 @@ CC0 팩을 받아 39프레임 아틀라스와 manifest를 굽습니다. 배운 �
 ```
 frontend/
   index.html        게임 본체 — 이 파일 하나가 전부입니다 (약 6,000줄)
-  verify.mjs        헤드리스 검증 하니스 — 단정 942건
+  verify.mjs        헤드리스 검증 하니스 — 단정 963건
   tools/
     pack_assets.py  CC0 애셋 → 아틀라스 파이프라인 (의존성 0)
   assets/
     sprites.png     39프레임 아틀라스 (60KB)
     music.ogg       C64 업템포 칩튠 루프 (CC0, 1.9MB)
-    manifest.json   프레임 표 + 라이선스/명도/크레딧 메타
+    sfx-*.ogg       효과음 11큐 (CC0, Kenney)
+    manifest.json   프레임 표 + 버전 + 라이선스/명도/길이/크레딧 메타
+
+## 새로고침 버그
+
+`manifest.json`은 `no-cache`로 받는데 아틀라스는 `Image`의 `src`로 로드돼 브라우저가 일반
+이미지처럼 캐시합니다. 그래서 리빌드 후에는 **새 manifest가 낡은 `sprites.png`를 가리키고**,
+타이틀 화면을 새로고침하면 이전 캐스트가 서 있었습니다. manifest에 **내용 해시** 버전을 넣고
+모든 애셋 URL에 `?v=`를 붙여 해결했습니다 — 타임스탬프가 아니라 해시이므로 아트가 바뀌지
+않은 리빌드는 캐시를 그대로 씁니다.
+
+같은 증상의 두 번째 원인도 있었습니다: `loadAssets()`를 던져놓고 즉시 그리기 시작해서 첫
+프레임들이 **내장 픽셀 배열**을 그린 뒤 아틀라스로 교체됐습니다. 이제 부팅이 로딩 화면에서
+대기합니다 — 다만 **마감 시간(2.5초)과 함께**입니다. 걸려서 안 풀리는 로딩 화면은 깜빡임보다
+나쁜 실패이고, `fetch`나 타이머가 없으면(`file://`, 헤드리스 하니스) 기다릴 것이 없으므로
+전환이 동기적으로 일어나 예전처럼 곧장 타이틀로 부팅합니다.
+
+그 과정에서 **별개의 버그**를 찾았습니다. `update()`의 "아무것도 시뮬레이션하지 않는" 목록에
+`credits`가 빠져 있어서, 타이틀에서 크레딧을 열면 전체 화면 오버레이 뒤에서 골목이 조용히
+시작됐습니다 — 적이 깨어나고 웨이브 타이머가 돌고 런 클럭이 올라가고 주인공이 스폰 타일에서
+걸어 나갔습니다. 세 오버레이 모두 단정이 검사합니다.
   shot.mjs          PNG 렌더러 — 브라우저 없이 화면을 눈으로 보는 도구
   hero_sprites.py   주인공 스프라이트 저작 도구 (오프라인, 실행에 불필요)
   foe_sprites.py    적 스프라이트 저작 도구 (오프라인, 실행에 불필요)
@@ -338,7 +372,7 @@ docs/
 # 1. index.html을 고친다
 
 # 2. 동작이 깨지지 않았는지 단정으로 확인
-node frontend/verify.mjs          # 942 passed, 0 failed 를 기대
+node frontend/verify.mjs          # 963 passed, 0 failed 를 기대
 
 # 3. 보이는 것이 맞는지 PNG로 굽고 눈으로 확인
 node frontend/shot.mjs            # shot-*.png 생성
