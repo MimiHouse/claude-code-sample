@@ -19,6 +19,10 @@ globalThis.__t = {
   NINJA_POSES, ENEMY_POSES, NINJA_IDLE, NINJA_CROUCH,
   P_NINJA, P_CHARGER, P_WARDEN, P_RUSHER,
   FONT, FONT_W, FONT_H, drawText, textWidth,
+  FONT_HD, FONT_HD_W, FONT_HD_H, drawTextHD, textWidthHD, RENDER_SCALE,
+  perfSample, FRAME_BUDGET, Q_FULL, Q_REDUCED, Q_MINIMAL,
+  get quality() { return quality; }, set quality(v) { quality = v; },
+  get perfMean() { return perfMean; }, get perfWorst() { return perfWorst; },
   spawnWaveRusher, groundTopRow, WAVE_INTERVAL, WAVE_MAX_ALIVE,
   separateBodies, hopIfBlocked, wallAhead, clearAbove, ENEMY_JUMP_VY,
   RUSH_SPEED, RUSH_LEAP_RANGE, SHURIKEN_SPEED,
@@ -69,6 +73,11 @@ globalThis.__t = {
   get bullets() { return bullets; },
   get shurikens() { return shurikens; },
   get hazards() { return hazards; },
+  get trauma() { return trauma; },
+  get punchX() { return punchX; }, get punchY() { return punchY; },
+  addTrauma, addPunch, updateShake, shakeOffsetX, shakeOffsetY,
+  TRAUMA_DECAY, SHAKE_PX, PUNCH_PX, IMPACT_TIME,
+  FREEZE_BLADE, FREEZE_SHURIKEN, drawSilhouette,
   PERCH_SCAN, PERCH_WIND, PERCH_DIVE_VX, PERCH_DIVE_VY, PERCH_LAND,
   PERCH_HIT_W, PERCH_HIT_TOP, PERCH_HIT_BOT, enemyPoseOf, drawEnemyWeapon,
   get pickups() { return pickups; },
@@ -1281,6 +1290,80 @@ check("kill tints the screen", t.flash > 0);
 tick(60);
 check("particles expire", t.particles.length === 0);
 
+console.log("\n== hit feel: trauma, the shove, and the impact frame ==");
+{
+  t.restart();
+  // 1. It COMPOSES. This is the whole reason it is a scalar and not a timer.
+  t.addTrauma(0.3);
+  const one = t.trauma;
+  t.addTrauma(0.3);
+  check("a second hit ADDS trauma rather than restarting it", t.trauma > one + 0.25,
+        `${one.toFixed(2)} -> ${t.trauma.toFixed(2)}`);
+  t.addTrauma(5);
+  check("trauma is clamped at full", t.trauma === 1, `${t.trauma}`);
+
+  // 2. Whole pixels only. Sub-pixel camera motion under pixelated upscaling is
+  //    the shimmer the whole background is built to avoid.
+  let allInt = true, peakFull = 0;
+  for (let i = 0; i < 40; i++) {
+    const x = t.shakeOffsetX(), y = t.shakeOffsetY();
+    if (!Number.isInteger(x) || !Number.isInteger(y)) allInt = false;
+    peakFull = Math.max(peakFull, Math.abs(x), Math.abs(y));
+    t.updateShake(0);                 // advance the phase, not the decay
+  }
+  check("the shake offset is always whole pixels", allInt);
+  check("full trauma shakes within its budget", peakFull > 2 && peakFull <= t.SHAKE_PX + t.PUNCH_PX,
+        `peak ${peakFull}px, budget ${t.SHAKE_PX}+${t.PUNCH_PX}px`);
+
+  // 3. Squared falloff: half the trauma is a QUARTER of the shake, which is
+  //    what puts a tap and a slam on one curve.
+  t.restart(); t.addTrauma(1);
+  let a = 0; for (let i = 0; i < 40; i++) { a = Math.max(a, Math.abs(t.shakeOffsetX())); t.updateShake(0); }
+  t.restart(); t.addTrauma(0.5);
+  let b = 0; for (let i = 0; i < 40; i++) { b = Math.max(b, Math.abs(t.shakeOffsetX())); t.updateShake(0); }
+  check("half the trauma is about a quarter of the shake", b > 0 && a / b >= 3,
+        `${a}px at full vs ${b}px at half`);
+
+  // 4. It goes away, and quickly. A shake that outlives the hit reads as a bug.
+  t.restart(); t.addTrauma(1);
+  let frames = 0;
+  while (t.trauma > 0 && frames < 120) { t.updateShake(t.STEP); frames++; }
+  check("full trauma is spent in under a third of a second",
+        frames * t.STEP < 0.33, `${(frames * t.STEP * 1000).toFixed(0)}ms`);
+
+  // 5. Hitstop HOLDS the shove. The freeze frame is the hit; a camera that
+  //    keeps moving through it turns the freeze into a stutter.
+  t.restart();
+  const kb = pickEnemy("charger", 7);
+  for (const x of t.enemies) if (x !== kb) x.alive = false;
+  stand(Math.floor(kb.x / t.TILE) - 2);
+  t.ninja.facing = 1;
+  for (let i = 0; i < 240 && kb.alive; i++) { t.slash(); tickIso(1); }
+  check("a blade kill leaves the world frozen", t.hitFreeze > 0,
+        `${(t.hitFreeze * 1000).toFixed(0)}ms`);
+  check("...and shoves the view", Math.hypot(t.punchX, t.punchY) > 1,
+        `${Math.hypot(t.punchX, t.punchY).toFixed(1)}px`);
+  check("the shove points AWAY from the player", t.punchX > 0,
+        `punchX=${t.punchX.toFixed(2)} (enemy was to the right)`);
+  const heldTrauma = t.trauma, heldPunch = t.punchX;
+  tick(1);
+  check("the freeze holds the shake still", t.trauma === heldTrauma && t.punchX === heldPunch,
+        `trauma ${heldTrauma.toFixed(3)} held`);
+
+  // 6. The impact frame exists and is gone almost immediately.
+  check("the kill sets an impact frame", kb.impact > 0,
+        `${(kb.impact * 1000).toFixed(0)}ms`);
+  check("the impact frame is two frames, not a lingering ghost",
+        kb.impact <= t.IMPACT_TIME + 1e-9 && t.IMPACT_TIME <= 3 / 60,
+        `${(t.IMPACT_TIME * 60).toFixed(0)} frames`);
+  // Drawn as a run-coalesced silhouette: cheap enough to leave on. A per-pixel
+  // stamp of the same pose is about 800 rects.
+  const before = rects.length;
+  t.drawSilhouette(t.ENEMY_POSES.charger.base, 40, 40, false, "#FFFFFF", t.CELL_NINJA);
+  check("the silhouette coalesces into runs", rects.length - before < 120,
+        `${rects.length - before} rects for a 32x48 stamp`);
+}
+
 // Particle gravity, tested where particles actually still exist.
 t.restart();
 t.spawnBurst(t.ninja.x, t.ninja.y - 40, 8, ["#FFFFFF"], 120, 0.6);
@@ -1447,6 +1530,89 @@ check("drawText emits only integer-aligned square pixels",
         Number.isInteger(r.x) && Number.isInteger(r.y)),
       `${glyphRects.length} pixels`);
 check("textWidth matches the advance used", t.textWidth("ABC", 2) === 3 * 4 * 2);
+
+/* THE HUD FONT, and the resolution it exists to use.
+   The 3x5 font above is fifteen pixels per character. That is enough for a
+   label and not enough for a number read at a glance, which is what made the
+   readout look coarse -- it WAS coarse, and upscaling cannot add detail nobody
+   drew. These checks pin down the three properties the replacement depends on:
+   it is denser, it snaps to the DEVICE grid rather than the world grid, and it
+   coalesces into runs so that density is affordable. */
+check("the render buffer is larger than the world grid", t.RENDER_SCALE >= 2,
+      `${t.VIEW_W}x${t.VIEW_H} world into a ${t.VIEW_W * t.RENDER_SCALE}x${t.VIEW_H * t.RENDER_SCALE} buffer`);
+check("the HUD font is denser than the label font",
+      t.FONT_HD_W * t.FONT_HD_H > t.FONT_W * t.FONT_H * 2,
+      `${t.FONT_HD_W}x${t.FONT_HD_H} = ${t.FONT_HD_W * t.FONT_HD_H} cells vs ${t.FONT_W * t.FONT_H}`);
+check("the HUD font covers the label font's glyph set",
+      Object.keys(t.FONT).every(ch => t.FONT_HD[ch]),
+      `${Object.keys(t.FONT_HD).length} HD glyphs vs ${Object.keys(t.FONT).length}`);
+let hdOk = true;
+for (const ch in t.FONT_HD) {
+  if (t.FONT_HD[ch].length !== t.FONT_HD_H) hdOk = false;
+  for (const row of t.FONT_HD[ch]) if (row.length !== t.FONT_HD_W) hdOk = false;
+}
+check("every HD glyph is the declared size", hdOk);
+rects.length = 0;
+t.drawTextHD("SCORE 014250", 8, 8, "#9CFF7A", 2);
+const hdMarks = rects.length;
+// A cell of 1 device pixel is half a world unit: the sub-unit precision is the
+// entire point, and asserting integer world coordinates here would forbid it.
+check("the HUD font lands on the DEVICE pixel grid",
+      rects.every(r => Number.isInteger(r.x * t.RENDER_SCALE) &&
+                       Number.isInteger(r.y * t.RENDER_SCALE) &&
+                       Number.isInteger(r.h * t.RENDER_SCALE)),
+      `${hdMarks} marks`);
+check("the HUD font coalesces runs rather than emitting cells",
+      hdMarks < 12 * t.FONT_HD_W * t.FONT_HD_H * 0.7,
+      `${hdMarks} marks for 12 characters (${12 * t.FONT_HD_W * t.FONT_HD_H} cells)`);
+check("textWidthHD matches the advance used",
+      t.textWidthHD("ABC", 2) === 3 * (t.FONT_HD_W + 1) * (2 / t.RENDER_SCALE));
+
+console.log("\n== the frame budget defends itself ==");
+{
+  /* The contract is narrow and worth stating: when frames are slow, DECORATION
+     goes and the GAME does not. The fixed timestep already guarantees the
+     simulation is identical at any frame rate, so the only thing quality is
+     allowed to touch is what gets drawn. */
+  t.restart();
+  t.quality = t.Q_FULL;
+  // Half a second of missed frames.
+  for (let i = 0; i < 40; i++) t.perfSample(t.FRAME_BUDGET + 8);
+  check("sustained slow frames drop the quality level", t.quality < t.Q_FULL,
+        `level ${t.quality}`);
+  const dropped = t.quality;
+  for (let i = 0; i < 40; i++) t.perfSample(t.FRAME_BUDGET + 8);
+  check("...and keep dropping it", t.quality < dropped, `level ${t.quality}`);
+  check("it never drops below the floor", t.quality >= t.Q_MINIMAL);
+  // Two comfortable seconds.
+  for (let i = 0; i < 300; i++) t.perfSample(t.FRAME_BUDGET * 0.4);
+  check("comfortable frames earn the level back", t.quality === t.Q_FULL,
+        `level ${t.quality}`);
+  /* A frame sitting exactly ON the budget must not flip the level every frame.
+     The drop test is "over budget" and the recovery test is "comfortably
+     under", so there is a dead band between them and 16.67ms sits in it. */
+  t.quality = t.Q_FULL;
+  for (let i = 0; i < 400; i++) t.perfSample(t.FRAME_BUDGET * 0.85);
+  check("a frame on the boundary cannot oscillate the level",
+        t.quality === t.Q_FULL, `level ${t.quality} after 400 boundary frames`);
+
+  // Fewer draw calls at a lower level, identical world.
+  t.restart(); stand(30);
+  tickIso(20);
+  const before = { x: t.ninja.x, y: t.ninja.y, foes: t.enemies.filter(e => e.alive).length };
+  t.quality = t.Q_FULL;
+  rects.length = 0; t.render();
+  const full = rects.length;
+  t.quality = t.Q_MINIMAL;
+  rects.length = 0; t.render();
+  const minimal = rects.length;
+  check("a lower quality level draws less", minimal < full,
+        `${full} -> ${minimal} marks`);
+  check("...and changes nothing about the world",
+        t.ninja.x === before.x && t.ninja.y === before.y &&
+        t.enemies.filter(e => e.alive).length === before.foes);
+  t.quality = t.Q_FULL;
+}
 
 console.log("\n== shuriken is faster but still cannot tunnel ==");
 check("shuriken speed raised", t.SHURIKEN_SPEED >= 450, `${t.SHURIKEN_SPEED} px/s`);
@@ -1742,8 +1908,13 @@ check("crossing the goal clears the stage without needing every flag",
       `mode=${t.mode} flags=${t.flagsTaken}/${t.flags.length}`);
 rects.length = 0;
 t.render();
-const glyphPx = rects.filter(r => r.w === 4 && r.h === 4).length;   // scale-4 title
-check("ending screen renders a large title", glyphPx > 40, `${glyphPx} title pixels`);
+/* The title is drawn with the 5x7 HUD font at a 5-device-pixel cell, so its
+   marks are RUNS one cell tall and one-or-more cells wide -- not the square
+   cells the 3x5 font emitted. Height is the stable thing to count. */
+const titleCell = 5 / t.RENDER_SCALE;
+const glyphPx = rects.filter(r => r.h === titleCell).length;
+check("ending screen renders a large title", glyphPx > 40,
+      `${glyphPx} marks at a ${titleCell}-unit cell`);
 const dim = rects.some(r => r.w === t.VIEW_W && typeof r.c === "string" &&
                             r.c.startsWith("rgba(8,10,16"));
 check("ending dims the playfield behind it", dim);
@@ -4111,12 +4282,20 @@ console.log("\n== enemies carry cloth, and each carries a different piece ==");
   }
 }
 
-console.log("\n== the blade kill is the ranged kill with a different sound ==");
-/* The complaint was that cutting an enemy down at melee range felt worse than
-   hitting one at range, and the ask was to make the DEATH identical and the
-   SOUND different. It was already the same killEnemy() call -- what differed is
-   that the blade arc, a near-white block 26px wide, outlived the kill by about
-   five frames and sat exactly where the burst spawns. */
+console.log("\n== the blade kill hits HARDER than the ranged kill ==");
+/* This block used to assert the opposite, and the history is worth keeping.
+   The original complaint was that a melee kill felt WORSE than a ranged one,
+   and the fix was to make the death identical and let only the sound differ --
+   the real culprit being a near-white arc 26px wide that outlived the kill and
+   sat on top of the burst.
+
+   Identical was the right fix for that bug and the wrong resting place. If a
+   katana at arm's length lands exactly as hard as a shuriken thrown across the
+   alley, the choice between them is a choice about ammunition and nothing else.
+   So the blade is now the heavier hit -- more debris, two more frames of
+   hitstop, a stronger shove -- while everything that decides the OUTCOME stays
+   identical: same killEnemy(), same score, same kill count, same respawn. Feel
+   differs; consequence does not. That split is what these checks pin down. */
 {
   function killBy(how) {
     t.restart();
@@ -4134,19 +4313,28 @@ console.log("\n== the blade kill is the ranged kill with a different sound ==");
     }
     return { alive: e.alive, particles: t.particles.length,
              freeze: t.hitFreeze, flash: t.flash, kills: t.kills,
-             score: t.score, sawHitFlag };
+             score: t.score, sawHitFlag,
+             trauma: t.trauma, punch: Math.hypot(t.punchX, t.punchY) };
   }
   const ranged = killBy("shuriken"), melee = killBy("slash");
   check("a shuriken kill lands", !ranged.alive);
   check("a blade kill lands", !melee.alive);
-  check("both spawn the same burst",
-        melee.particles === ranged.particles && ranged.particles >= 12,
+  check("the blade throws more debris", melee.particles > ranged.particles &&
+        ranged.particles >= 12,
         `blade ${melee.particles} vs shuriken ${ranged.particles} particles`);
-  check("both apply the same hitstop", melee.freeze === ranged.freeze,
-        `${melee.freeze} vs ${ranged.freeze}`);
-  check("both tint the screen the same", melee.flash === ranged.flash);
+  check("the blade freezes the world longer", melee.freeze > ranged.freeze,
+        `${(melee.freeze * 1000).toFixed(0)}ms vs ${(ranged.freeze * 1000).toFixed(0)}ms`);
+  check("the blade tints the screen harder", melee.flash > ranged.flash,
+        `${melee.flash.toFixed(3)} vs ${ranged.flash.toFixed(3)}`);
+  check("the blade shakes the view harder", melee.trauma > ranged.trauma,
+        `trauma ${melee.trauma.toFixed(2)} vs ${ranged.trauma.toFixed(2)}`);
+  check("the blade shoves the view harder", melee.punch > ranged.punch,
+        `punch ${melee.punch.toFixed(2)}px vs ${ranged.punch.toFixed(2)}px`);
+  // The outcome, as opposed to the feel, is still weapon-blind.
   check("both score the same", melee.score === ranged.score,
         `${melee.score} vs ${ranged.score}`);
+  check("hitstop stays short enough to read as impact rather than lag",
+        melee.freeze <= 6 / 60, `${(melee.freeze * 1000).toFixed(0)}ms`);
   check("a slash that connected marks itself", melee.sawHitFlag);
   check("...and a shuriken never sets that flag", !ranged.sawHitFlag);
   // The arc stops drawing once it has connected. Tested on the flag rather than

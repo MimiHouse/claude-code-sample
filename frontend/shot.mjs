@@ -41,7 +41,11 @@ globalThis.__t = { ninja, cam, render, update, updateCamera, snapCamera, spawn,
   DASH_TIME, CHG_WINDUP, CHG_SWING, CHG_LUNGE_WIND, WARD_SWEEP_WIND,
   WARD_SWEEP_TIME, WARD_AIM, ENEMY_H, ENEMY_W, ROWS,
   PERCH_WIND, PERCH_LAND, PERCH_SCAN, enemyPoseOf, solidAt, COLS, CAM_Y,
-  ENEMY_WAKE, get hazards() { return hazards; } };`;
+  ENEMY_WAKE, get hazards() { return hazards; },
+  RENDER_SCALE, drawTextHD, textWidthHD, FONT_HD, FONT_HD_W, FONT_HD_H,
+  slash, get hitFreeze() { return hitFreeze; }, get trauma() { return trauma; },
+  get punchX() { return punchX; }, shakeOffsetX, shakeOffsetY, killEnemy,
+  get particles() { return particles; }, TILE, BODY_W };`;
 
 /* --- PNG decode ----------------------------------------------------------- */
 /* Enough of the spec for what our own pipeline emits and for anything a normal
@@ -324,13 +328,21 @@ function writePNG(path, buf, W, H) {
   ]));
 }
 
+/* render() now paints into a buffer RENDER_SCALE times the world size, and the
+   recording context flattens that transform -- so the raster has to be the size
+   of the real buffer, not the size of the world. The nearest-neighbour blow-up
+   afterwards drops by the same factor, which keeps every shot the same number
+   of output pixels it was before while those pixels now carry real detail
+   instead of repeats. */
 function shoot(name, setup, k = 2) {
   rects.length = 0;
   setup();
   t.render();
-  const W = t.VIEW_W, H = t.VIEW_H;
-  writePNG(name, scale(raster(W, H, rects), W, H, k), W * k, H * k);
-  console.log(`wrote ${name} (${rects.length} rects)`);
+  const RS = t.RENDER_SCALE || 1;
+  const W = t.VIEW_W * RS, H = t.VIEW_H * RS;
+  const kk = Math.max(1, Math.round(k / RS));
+  writePNG(name, scale(raster(W, H, rects), W, H, kk), W * kk, H * kk);
+  console.log(`wrote ${name} (${rects.length} rects, ${W}x${H} buffer)`);
 }
 
 // --- 1. title screen -------------------------------------------------------
@@ -607,4 +619,33 @@ shoot("shot-dash.png", () => {
                 ` dx=${s && (t.ninja.x - s.x).toFixed(0)} ninja=${t.ninja.x.toFixed(0)}` +
                 ` hazards=${t.hazards.length}`);
   });
+});
+
+// --- 13. the frame a blade kill lands on ---------------------------------
+// The impact frame, the shove and the debris all live for two to five frames,
+// which is exactly why they need a picture: they are invisible to anything but
+// a still. The body is flat white, the action layer is shoved away from the
+// player, and the background is NOT -- a shaken sky would read as the camera
+// being hit rather than the enemy.
+shoot("shot-impact.png", () => {
+  t.restart(); t.wakeT = 0;
+  t.cam.y = t.CAM_Y;
+  // One enemy, on flat ground, close enough to cut.
+  let victim = null;
+  for (const e of t.enemies) {
+    if (!victim && e.kind === "charger" && !e.ledge && !e.post &&
+        e.x > 30 * t.TILE && e.x < 120 * t.TILE) { victim = e; continue; }
+    e.alive = false;
+  }
+  t.ninja.x = victim.x - 34; t.ninja.y = 20 * t.TILE - t.BODY_H;
+  t.ninja.onGround = true; t.ninja.facing = 1; t.ninja.invuln = 999;
+  t.snapCamera();
+  t.slash();
+  for (let i = 0; i < 40 && victim.alive; i++) { t.ninja.invuln = 999; t.update(t.STEP); }
+  t.playTime = 31; t.score = 5200;
+  console.log(`   impact=${(victim.impact * 1000).toFixed(0)}ms` +
+              ` freeze=${(t.hitFreeze * 1000).toFixed(0)}ms` +
+              ` trauma=${t.trauma.toFixed(2)}` +
+              ` shove=(${t.shakeOffsetX()},${t.shakeOffsetY()})px` +
+              ` debris=${t.particles.length}`);
 });

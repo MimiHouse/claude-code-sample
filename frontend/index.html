@@ -19,7 +19,8 @@
 </style>
 </head>
 <body>
-<canvas id="game" width="640" height="360"></canvas>
+<!-- Sized from script (VIEW_W/H x RENDER_SCALE); these are the fallback. -->
+<canvas id="game" width="1280" height="720"></canvas>
 <script>
 "use strict";
 
@@ -35,6 +36,29 @@
 /* --- CONFIG --------------------------------------------------------------- */
 
 const VIEW_W = 640, VIEW_H = 360;
+/* RENDER SCALE.
+   The world is still laid out in 640x360 units and every physics, collision,
+   camera and stage number below is in those units -- none of that moves. What
+   changed is the BUFFER those units are painted into: it is RENDER_SCALE times
+   larger, and render() applies a single ctx.scale() so that all the drawing
+   code keeps writing world coordinates and never has to know.
+
+   The point is the HUD. A 3x5 glyph on a 640x360 buffer is 15 pixels of
+   information for a whole character, and no amount of upscaling adds detail
+   that was never drawn -- the readout looked coarse because it WAS coarse.
+   At scale 2 there are four times the pixels to put a glyph in, so the font
+   below is 5x7 instead of 3x5 and hairlines half a unit wide are possible.
+
+   Sprites are unaffected: integer world coordinates land on 2x2 device blocks,
+   which is the same picture. `imageSmoothingEnabled = false` keeps atlas blits
+   nearest-neighbour through the scale rather than blurring them.
+
+   The harness split matters. verify.mjs stubs ctx.scale() as a no-op, so every
+   geometry assertion it makes still reads world units and none of them had to
+   change. shot.mjs honours the transform and rasters at the true buffer size,
+   so the pictures show what a browser shows. Logic is checked in world units;
+   appearance is checked in device pixels. */
+const RENDER_SCALE = 2;
 const TILE = 16, ROWS = 22, SEG_W = 40;
 const WORLD_H = ROWS * TILE;          // 352
 const CAM_Y = -8;                     // bottom tile row sits flush with the screen
@@ -124,6 +148,48 @@ const FONT_SRC = [
   ". ... ... ... ... .#.", "> #.. .#. ..# .#. #..",
   "< ..# .#. #.. .#. ..#"
 ];
+/* The HUD font: 5x7, and the reason RENDER_SCALE exists.
+   The 3x5 above is kept -- it is the right size for the tiny in-world labels
+   and 883 assertions' worth of behaviour hangs off it -- but it cannot carry a
+   readout. Five rows of three pixels has no room for a stroke that is thinner
+   than a third of the glyph, so every letter is the same weight as its own
+   counters and "SCORE" reads as five smudges.
+
+   Sizes are given in DEVICE pixels and divided by RENDER_SCALE on the way in,
+   so a caller asks for "3px strokes" and gets them regardless of what the
+   buffer scale happens to be. At scale 2 a px of 1 is a genuine single-device-
+   pixel stroke, which the 640x360 buffer simply could not express. */
+const FONT_HD_W = 5, FONT_HD_H = 7;
+const FONT_HD_SRC = [
+  "0 .###. #...# #..## #.#.# ##..# #...# .###.", "1 ..#.. .##.. ..#.. ..#.. ..#.. ..#.. .###.",
+  "2 .###. #...# ....# ...#. ..#.. .#... #####", "3 .###. #...# ....# ..##. ....# #...# .###.",
+  "4 ...#. ..##. .#.#. #..#. ##### ...#. ...#.", "5 ##### #.... ####. ....# ....# #...# .###.",
+  "6 ..##. .#... #.... ####. #...# #...# .###.", "7 ##### ....# ...#. ..#.. .#... .#... .#...",
+  "8 .###. #...# #...# .###. #...# #...# .###.", "9 .###. #...# #...# .#### ....# ...#. .##..",
+  "A .###. #...# #...# ##### #...# #...# #...#", "B ####. #...# #...# ####. #...# #...# ####.",
+  "C .###. #...# #.... #.... #.... #...# .###.", "D ####. #...# #...# #...# #...# #...# ####.",
+  "E ##### #.... #.... ####. #.... #.... #####", "F ##### #.... #.... ####. #.... #.... #....",
+  "G .###. #...# #.... #.### #...# #...# .####", "H #...# #...# #...# ##### #...# #...# #...#",
+  "I .###. ..#.. ..#.. ..#.. ..#.. ..#.. .###.", "J ..### ...#. ...#. ...#. ...#. #..#. .##..",
+  "K #...# #..#. #.#.. ##... #.#.. #..#. #...#", "L #.... #.... #.... #.... #.... #.... #####",
+  "M #...# ##.## #.#.# #.#.# #...# #...# #...#", "N #...# ##..# #.#.# #..## #...# #...# #...#",
+  "O .###. #...# #...# #...# #...# #...# .###.", "P ####. #...# #...# ####. #.... #.... #....",
+  "Q .###. #...# #...# #...# #.#.# .###. ...##", "R ####. #...# #...# ####. #.#.. #..#. #...#",
+  "S .#### #.... #.... .###. ....# ....# ####.", "T ##### ..#.. ..#.. ..#.. ..#.. ..#.. ..#..",
+  "U #...# #...# #...# #...# #...# #...# .###.", "V #...# #...# #...# #...# #...# .#.#. ..#..",
+  "W #...# #...# #...# #.#.# #.#.# ##.## .#.#.", "X #...# #...# .#.#. ..#.. .#.#. #...# #...#",
+  "Y #...# #...# .#.#. ..#.. ..#.. ..#.. ..#..", "Z ##### ....# ...#. ..#.. .#... #.... #####",
+  "SP ..... ..... ..... ..... ..... ..... .....", "/ ....# ...#. ...#. ..#.. .#... .#... #....",
+  ": ..... .##.. .##.. ..... .##.. .##.. .....", ". ..... ..... ..... ..... ..... .##.. .##..",
+  ", ..... ..... ..... ..... .##.. .##.. ..#..", "- ..... ..... ..... ##### ..... ..... .....",
+  "+ ..... ..#.. ..#.. ##### ..#.. ..#.. .....", "! ..#.. ..#.. ..#.. ..#.. ..#.. ..... ..#..",
+  "? .###. #...# ....# ..##. ..#.. ..... ..#..", "% #...# #..#. ..#.. ..#.. ..#.. .#..# #...#",
+  "( ...#. ..#.. .#... .#... .#... ..#.. ...#.", ") .#... ..#.. ...#. ...#. ...#. ..#.. .#...",
+  "' ..#.. ..#.. ..... ..... ..... ..... .....", "* ..... #.#.# .###. ##### .###. #.#.# .....",
+  "= ..... ..... ##### ..... ##### ..... .....",
+  "< ....# ...#. ..#.. .#... ..#.. ...#. ....#", "> #.... .#... ..#.. ...#. ..#.. .#... #...."
+];
+
 const FONT = {};
 for (const line of FONT_SRC) {
   const parts = line.split(" ");
@@ -134,6 +200,13 @@ for (const line of FONT_SRC) {
   }
   FONT[ch] = parts.slice(1);
 }
+const FONT_HD = {};
+for (const line of FONT_HD_SRC) {
+  const parts = line.split(" ");
+  const ch = parts[0] === "SP" ? " " : parts[0];
+  FONT_HD[ch] = parts.slice(1);
+}
+
 const SPRITE_W = NINJA_COLS * CELL_NINJA;      // 32
 const BODY_W = 20, BODY_H = NINJA_ROWS * CELL_NINJA;   // 20 x 48
 const SPRITE_OFF_X = -((SPRITE_W - BODY_W) / 2);       // -6
@@ -217,6 +290,35 @@ const ARC_CY = 26, ARC_RY = 38, ARC_THICK = 8;
 // Death is a freeze frame, not an explosion. A short beat in full colour so the
 // hit registers, then the drain to grey, then a held still before the reset.
 // DEATH_TIME is the whole sequence; respawn happens at its end.
+/* HIT FEEL.
+   TRAUMA, not a timer. A shake driven by a decaying scalar COMPOSES: two kills
+   three frames apart add up, where a timer would restart the second one at the
+   same amplitude the first was already at. Offsets are trauma SQUARED, so a tap
+   and a slam sit on one curve instead of needing two systems.
+
+   Rounded to whole pixels, always. Sub-pixel camera motion under
+   image-rendering: pixelated is the shimmer that makes an entire screen crawl,
+   and the background layers are already built to avoid exactly that.
+
+   The PUNCH is separate and DIRECTIONAL. Vibration says "something happened";
+   a view shoved a few pixels the way the blow travelled, easing back, is what
+   says the blow had weight. Shake alone never reads as heavy.
+
+   The offsets are driven by a frame counter through two out-of-phase sines
+   rather than by Math.random(): noise at 60Hz reads as noise, and a frame-dump
+   tool cannot photograph noise the same way twice. */
+const TRAUMA_DECAY = 3.6;        // full trauma is spent in ~0.28s
+const SHAKE_PX = 7;              // amplitude at full trauma
+const PUNCH_PX = 6, PUNCH_DECAY = 9.0;
+const TRAUMA_BLADE = 0.62, TRAUMA_SHURIKEN = 0.42, TRAUMA_LAND = 0.16;
+/* HITSTOP IS TIERED. One value for every kill made a shuriken from across the
+   alley land as hard as a katana at arm's length, which flattens the whole
+   weapon choice. The blade gets two more frames than the throw. */
+const FREEZE_BLADE = 5 / 60, FREEZE_SHURIKEN = 3 / 60;
+// Two frames of flat white where the body was. The oldest trick in fighting
+// games and still the cheapest way to make a hit land.
+const IMPACT_TIME = 2 / 60;
+
 const DEATH_HOLD = 0.12, DEATH_FADE = 0.33, DEATH_TIME = 1.05;
 
 // Three lives per run. Spending the last one ends the run and returns to the
@@ -2918,6 +3020,10 @@ if (stageLips.length)
 /* --- STATE ---------------------------------------------------------------- */
 
 const canvas = document.getElementById("game");
+// One source of truth for the buffer size: the attributes in the markup are a
+// fallback for a browser that somehow runs the HTML without the script.
+canvas.width = VIEW_W * RENDER_SCALE;
+canvas.height = VIEW_H * RENDER_SCALE;
 const ctx = canvas.getContext("2d");
 ctx.imageSmoothingEnabled = false;
 
@@ -2944,6 +3050,46 @@ let stageTotal = 0;        // every attempt at this stage: what the bonus costs
 let clock = 0;   // game-time animation clock (drives background life)
 let flash = 0, flashCol = "255,240,210";
 let hitFreeze = 0, dyingT = 0, waveTimer = 0;
+let trauma = 0, punchX = 0, punchY = 0, shakeFrame = 0;
+
+/* FRAME BUDGET, MEASURED.
+   60fps is a 16.67ms budget and the only honest way to know where it goes is to
+   time it. This exists because a guess was wrong by a factor of five: the
+   background looked like the expensive layer, and drawEntities turned out to be
+   86% of the draw, painting fifty-four off-screen enemies a pixel at a time.
+   Nobody was going to find that by reading the code, and it had been there
+   since the renderer was written.
+
+   The figures are a rolling mean plus the WORST frame in the last second: a
+   mean of 8ms with a 40ms spike in it is a stutter the player feels and the
+   mean does not report.
+
+   QUALITY steps down on its own. If the budget is missed for half a second the
+   extras go, most expensive first: the additive window and sign spill, then the
+   ash and the fog. Gameplay is never touched -- the fixed timestep already
+   guarantees the SIMULATION is identical at any frame rate, so what degrades is
+   decoration and what survives is the game. It steps back up after two quiet
+   seconds, and the recovery threshold is well inside the drop threshold so a
+   frame sitting exactly on the budget cannot flip the level every frame. */
+const FRAME_BUDGET = 1000 / 60;
+const PERF_WINDOW = 60;             // frames the rolling figures cover
+const Q_FULL = 2, Q_REDUCED = 1, Q_MINIMAL = 0;
+let quality = Q_FULL, qualityLocked = false;
+let perfUpd = 0, perfRen = 0, perfMean = 0, perfWorst = 0;
+let perfSamples = 0, perfAccum = 0, perfPeak = 0, overBudget = 0, underBudget = 0;
+
+function perfSample(ms) {
+  perfAccum += ms; perfPeak = Math.max(perfPeak, ms);
+  if (++perfSamples >= PERF_WINDOW) {
+    perfMean = perfAccum / perfSamples; perfWorst = perfPeak;
+    perfSamples = 0; perfAccum = 0; perfPeak = 0;
+  }
+  if (qualityLocked) return;
+  if (ms > FRAME_BUDGET) { overBudget++; underBudget = 0; }
+  else if (ms < FRAME_BUDGET * 0.72) { underBudget++; overBudget = 0; }
+  if (overBudget >= 30 && quality > Q_MINIMAL) { quality--; overBudget = 0; }
+  else if (underBudget >= 120 && quality < Q_FULL) { quality++; underBudget = 0; }
+}
 let vaultsFired = [];      // one entry per site, reset with the attempt
 // "title" -> opening screen; "play"; "paused"; "dying" (freeze frame);
 // "gameover" -> last life spent, returns to title; "clear" -> stage finished.
@@ -2995,6 +3141,9 @@ function respawn() {
   ninja.invuln = 0; ninja.walkDist = 0; ninja.walkRate = 0;
   ninja.dashT = 0; ninja.dashCd = 0; ninja.airDashes = 0; ninja.ghostT = 0;
   ghosts = [];
+  // A shove left over from the kill that preceded the death would be held
+  // through the whole freeze frame and then snap back on the respawn.
+  trauma = 0; punchX = 0; punchY = 0;
   playTime = 0;              // each life is timed from zero...
   wakeT = ENEMY_WAKE;        // ...and so does the grace before anything engages
   // The stale comment below is about the removed screen-clearing strike; what
@@ -3012,6 +3161,7 @@ function restart() {
   lives = START_LIVES; gameOverT = 0; playTime = 0; stageTotal = 0;
   score = 0; timeBonus = 0; newRecord = false;
   clock = 0; cam.x = 0; hitFreeze = 0; dyingT = 0; waveTimer = WAVE_INTERVAL;
+  trauma = 0; punchX = 0; punchY = 0;
   vaultsFired = [];
   flash = 0; flashCol = "255,240,210";
   flash = 0; wakeT = ENEMY_WAKE; mode = "play";
@@ -4044,6 +4194,32 @@ function leadHazard(e, w, top, bot) {
    give it weight: a particle burst in the victim's own palette, a couple of
    frames of hitstop so the hit registers, and a tinted screen flash.        */
 
+function addTrauma(amount) { trauma = Math.min(1, trauma + amount); }
+
+// Direction is normalised and the magnitude passed separately, so callers say
+// "that way, this hard" rather than having to scale a vector themselves.
+function addPunch(dx, dy, mag) {
+  const len = Math.hypot(dx, dy) || 1;
+  punchX += (dx / len) * mag;
+  punchY += (dy / len) * mag;
+}
+
+function updateShake(dt) {
+  trauma = Math.max(0, trauma - TRAUMA_DECAY * dt);
+  const k = Math.exp(-PUNCH_DECAY * dt);
+  punchX *= k; punchY *= k;
+  if (Math.abs(punchX) < 0.05) punchX = 0;
+  if (Math.abs(punchY) < 0.05) punchY = 0;
+  shakeFrame++;
+}
+
+function shakeOffsetX() {
+  return Math.round(Math.sin(shakeFrame * 2.31) * SHAKE_PX * trauma * trauma + punchX);
+}
+function shakeOffsetY() {
+  return Math.round(Math.cos(shakeFrame * 3.07) * SHAKE_PX * 0.7 * trauma * trauma + punchY);
+}
+
 function spawnBurst(cx, cy, count, colors, speed, life) {
   for (let i = 0; i < count; i++) {
     const a = (i / count) * Math.PI * 2 + Math.random() * 0.7;
@@ -4156,15 +4332,27 @@ function vaultAirborne(e) {
   return e.vault === true && VAULT_STAGES.indexOf(e.state) >= 0;
 }
 
+/* `silent` also means "by the blade": the arc suppresses the per-body kill cue
+   and plays one for the whole swing, and it is the only caller that does. So
+   the melee tier is read off it rather than threaded through as a second
+   parameter that could disagree with the first. */
 function killEnemy(e, silent) {
-  e.alive = false; e.dying = 0.35; kills++;
+  const blade = !!silent;
+  e.alive = false; e.dying = 0.35; e.impact = IMPACT_TIME; kills++;
   score += SCORE_KILL;
   const pal = e.kind === "charger" ? P_CHARGER
             : e.kind === "rusher"  ? P_RUSHER : P_WARDEN;
-  spawnBurst(e.x + e.w / 2, e.y + e.h / 2, 16,
-             [pal.G, pal.H, pal.D, "#FFFFFF", "#FFE45E"], 180, 0.5);
-  hitFreeze = 0.05;                 // 3 frames: reads as impact, not as lag
-  flash = 0.10; flashCol = "255,250,225";
+  spawnBurst(e.x + e.w / 2, e.y + e.h / 2, blade ? 22 : 16,
+             [pal.G, pal.H, pal.D, "#FFFFFF", "#FFE45E"], blade ? 215 : 180, 0.5);
+  // Hitstop is raised, never lowered: a second kill inside the first one's
+  // freeze must not cut it short.
+  hitFreeze = Math.max(hitFreeze, blade ? FREEZE_BLADE : FREEZE_SHURIKEN);
+  addTrauma(blade ? TRAUMA_BLADE : TRAUMA_SHURIKEN);
+  // The view is shoved AWAY from the player, along the line the blow travelled.
+  addPunch((e.x + e.w / 2) - (ninja.x + ninja.w / 2),
+           (e.y + e.h / 2) - (ninja.y + ninja.h / 2) - 10,
+           blade ? PUNCH_PX : PUNCH_PX * 0.6);
+  flash = blade ? 0.13 : 0.10; flashCol = "255,250,225";
   // A caller that kills several at once suppresses these: a dozen stacked kill
   // sounds is a noise blast rather than a dozen kills.
   if (!silent) sfxKill();
@@ -4913,7 +5101,12 @@ function update(dt) {
   playTime += dt;
   stageTotal += dt;
   // Hitstop: freeze the world for a few frames so a kill lands.
+  /* Hitstop freezes the shake too, deliberately. The held frame is what the
+     hit IS; letting the camera keep moving through it turns the freeze into a
+     stutter. The shove is therefore still on screen, held, and the decay picks
+     up the moment the world starts again. */
   if (hitFreeze > 0) { hitFreeze -= dt; flash = Math.max(0, flash - dt); return; }
+  updateShake(dt);
 
   // The dash puts the body on rails: while it runs, acceleration, friction,
   // gravity and the crouch are all suspended, and every other system -- enemy
@@ -4983,7 +5176,17 @@ function update(dt) {
   // The screen's left edge is a wall: the camera never rewinds, so the ninja
   // cannot be allowed to walk out of the viewport behind it.
   if (ninja.x < cam.x) { ninja.x = cam.x; if (ninja.vx < 0) ninja.vx = 0; }
-  if (wasAirborne && ninja.onGround && impactVy >= LAND_VY) ninja.landTimer = LAND_TIME;
+  if (wasAirborne && ninja.onGround && impactVy >= LAND_VY) {
+    ninja.landTimer = LAND_TIME;
+    /* A hard landing is an impact and was silent. Scaled by how fast he was
+       going, so stepping off a cover block is not the same event as falling the
+       height of the alley -- one kick of dust, one for the full drop. */
+    const f = Math.min(1, (impactVy - LAND_VY) / (MAX_FALL - LAND_VY));
+    addTrauma(TRAUMA_LAND * (0.45 + f));
+    spawnBurst(ninja.x + ninja.w / 2, ninja.y + ninja.h - 1,
+               3 + Math.round(f * 5), ["#B6AC9A", "#8E8676", "#6A6458"],
+               60 + f * 70, 0.24);
+  }
 
   if (ninja.y > WORLD_H + 64) { killNinja(); return; }
 
@@ -4993,7 +5196,11 @@ function update(dt) {
   crowdYield();            // before the bodies move, not after
 
   for (const e of enemies) {
-    if (!e.alive) { e.dying = Math.max(0, e.dying - dt); continue; }
+    if (!e.alive) {
+      e.dying = Math.max(0, e.dying - dt);
+      e.impact = Math.max(0, (e.impact || 0) - dt);
+      continue;
+    }
     // A vaulter mid-air is always ticked: it is fired ahead of the camera on
     // purpose, and skipping it would leave it hanging in the sky until the
     // camera caught up, at which point it would drop with no warning at all.
@@ -5193,6 +5400,35 @@ function drawText(str, x, y, color, scale) {
     cx += (FONT_W + 1) * sc;
   }
 }
+/* `px` is the size of one glyph cell in DEVICE pixels. Coordinates are world
+   units, as everywhere else. Positions are snapped to the device grid rather
+   than the world grid -- snapping to whole world units would throw away the
+   extra resolution this font exists to use. */
+function drawTextHD(str, x, y, color, px) {
+  const s = (px || 2) / RENDER_SCALE;
+  ctx.fillStyle = color;
+  let cx = Math.round(x * RENDER_SCALE) / RENDER_SCALE;
+  const yy = Math.round(y * RENDER_SCALE) / RENDER_SCALE;
+  for (const ch of String(str).toUpperCase()) {
+    const g = FONT_HD[ch] || FONT_HD[" "];
+    for (let r = 0; r < FONT_HD_H; r++) {
+      let run = 0;
+      for (let c = 0; c <= FONT_HD_W; c++) {
+        if (c < FONT_HD_W && g[r][c] === "#") { run++; continue; }
+        if (!run) continue;
+        // Runs, not cells: a 5x7 glyph has about twice the set pixels of a 3x5
+        // one, and the HUD draws a few hundred of them every frame.
+        ctx.fillRect(cx + (c - run) * s, yy + r * s, run * s, s);
+        run = 0;
+      }
+    }
+    cx += (FONT_HD_W + 1) * s;
+  }
+}
+function textWidthHD(str, px) {
+  return String(str).length * (FONT_HD_W + 1) * ((px || 2) / RENDER_SCALE);
+}
+
 function textWidth(str, scale) {
   return String(str).length * (FONT_W + 1) * (scale || 2);
 }
@@ -5379,6 +5615,145 @@ function drawStars() {
   });
 }
 
+/* --- LIT WINDOWS ---------------------------------------------------------- */
+/* The windows were the brightest thing in the frame and that was the right
+   call; what they were not was a LIGHT. A bright rectangle on a dark facade is
+   a sticker. A light spills.
+
+   So every lit window now gets two concentric additive rings around it. The
+   compositing is what does the work -- "lighter" adds to whatever is behind it,
+   so the spill brightens the facade it sits on and fades into it, which no
+   amount of picking a paler fill can imitate. Two rings, not a gradient:
+   gradients band under nearest-neighbour upscaling and the bands crawl as the
+   camera moves, which is the same reason the moon's halo is three flat rings.
+
+   Windows also stopped being one colour. Three classes, seeded per window:
+     WARM  domestic light, the bulk of them
+     COOL  a television, and it FLICKERS fast and shallowly rather than
+           switching, because that is what a screen looks like from outside
+     DARK  unlit, near the facade colour so it reads as a window and not a hole
+   And about one lit window in nine has someone standing in it -- a dark bar
+   across the lower half, held for several seconds. One silhouette per screen is
+   the difference between a lit building and an inhabited one. */
+const WIN_WARM = "#FFD98A", WIN_WARM_HOT = "#FFF0C4";
+const WIN_COOL = "#B9DFF5", WIN_DARK = "#1E2742";
+
+/* `key` must be built from the WORLD panel index, never from a screen x -- the
+   whole layer re-rolls on every camera move otherwise, which is the strobe this
+   background had before the ids were introduced. */
+function drawWindow(wx, wy, w, h, key, bloom) {
+  const base = rnd(key) > 0.45;
+  const blinker = rnd(key * 7 + 3) > 0.82;
+  const phase = Math.floor(clock / 3.5 + rnd(key * 11) * 9);
+  let lit = blinker ? rnd(key * 3 + phase * 17) > 0.45 : base;
+  if (!lit) { ctx.fillStyle = WIN_DARK; ctx.fillRect(wx, wy, w, h); return; }
+
+  const tv = rnd(key * 29 + 5) > 0.86;
+  let col = WIN_WARM, glow = "255,214,132", strength = 1;
+  if (tv) {
+    // A shallow, fast wobble. Deep enough to notice, not deep enough to read
+    // as a bulb being switched -- that is what the slow blinkers are for.
+    const f = 0.62 + 0.38 * Math.abs(Math.sin(clock * 7.3 + rnd(key * 3) * 6));
+    col = WIN_COOL; glow = "150,205,240"; strength = f;
+  } else if (rnd(key * 37 + 11) > 0.80) {
+    col = WIN_WARM_HOT; glow = "255,238,190"; strength = 1.25;
+  }
+
+  if (bloom && quality >= Q_FULL) {
+    ctx.globalCompositeOperation = "lighter";
+    ctx.fillStyle = "rgba(" + glow + "," + (0.050 * strength).toFixed(3) + ")";
+    ctx.fillRect(wx - 3, wy - 3, w + 6, h + 6);
+    ctx.fillStyle = "rgba(" + glow + "," + (0.085 * strength).toFixed(3) + ")";
+    ctx.fillRect(wx - 1, wy - 1, w + 2, h + 2);
+    ctx.globalCompositeOperation = "source-over";
+  }
+  ctx.fillStyle = col;
+  ctx.fillRect(wx, wy, w, h);
+
+  // Somebody home. Held for ~4s blocks so it is a person standing there rather
+  // than a pixel flickering.
+  if (!tv && w >= 5 && h >= 6 && rnd(key * 53 + 17) > 0.89 &&
+      Math.floor(clock / 4.1 + rnd(key * 13) * 5) % 3 === 0) {
+    ctx.fillStyle = "rgba(40,30,22,0.72)";
+    ctx.fillRect(wx + ((w - 2) >> 1), wy + Math.max(1, h >> 2), 2, h - (h >> 2) - 1);
+  }
+}
+
+/* --- ATMOSPHERE ----------------------------------------------------------- */
+/* Three cheap layers that do most of the work of making the alley feel like
+   air rather than like flat cutouts at different distances. */
+
+// Haze pooled at the base of a distance layer. Night does not lighten distance
+// the way daylight haze does, but a city's own light does pool low -- and a
+// few flat steps of it is what separates one silhouette band from the next.
+function drawHazeBand(y, h, col) {
+  const steps = 5;
+  for (let i = 0; i < steps; i++) {
+    const a = 0.17 * (1 - i / steps);
+    ctx.fillStyle = "rgba(" + col + "," + a.toFixed(3) + ")";
+    ctx.fillRect(0, y + Math.round((i / steps) * h), VIEW_W, Math.ceil(h / steps) + 1);
+  }
+}
+
+/* Fog, on its OWN clock rather than on the camera. Every other layer here
+   scrolls with cam.x at some divisor, so all of them stop dead when the player
+   stops -- and a city that freezes the instant you stand still is the thing
+   that made this background read as a painting. Fog that drifts on `clock`
+   keeps moving when nothing else does, which is what sells the rest. */
+function drawFog() {
+  if (quality < Q_REDUCED) return;
+  for (let band = 0; band < 2; band++) {
+    const y = 138 + band * 26;
+    const speed = 5 + band * 4;
+    const off = Math.floor(clock * speed) % 260;
+    const a = (0.075 + band * 0.03).toFixed(3);
+    ctx.fillStyle = "rgba(150,160,186," + a + ")";
+    for (let i = -1; i * 260 - off < VIEW_W + 260; i++) {
+      const bx = i * 260 - off;
+      // Three overlapping slabs of different widths per period: one slab per
+      // period is a moving stripe, and a stripe reads as a seam.
+      ctx.fillRect(bx, y, 150, 7 + band * 3);
+      ctx.fillRect(bx + 96, y + 4, 104, 5 + band * 2);
+      ctx.fillRect(bx + 40, y - 3, 70, 4);
+    }
+  }
+}
+
+/* Ash, or fine rain -- whichever the eye decides. Computed rather than
+   allocated: sixty flecks whose positions are a pure function of `clock` and
+   their own index, wrapped by modulo. No array, no spawn, no lifetime, and it
+   cannot interact with the particle budget the hit effects live on.
+
+   Two depths, because one is a curtain. The far layer is slower, dimmer and
+   drifts less, and it is the difference between weather and a screen door. */
+const ASH_COUNT = 60;
+function drawAsh() {
+  if (quality < Q_REDUCED) return;
+  const count = quality >= Q_FULL ? ASH_COUNT : ASH_COUNT >> 1;
+  for (let i = 0; i < count; i++) {
+    const far = i % 3 === 0;
+    const fall = far ? 26 : 44;
+    const drift = far ? 9 : 16;
+    const seed = rnd(i * 71 + 3);
+    const x = ((seed * 900 + clock * drift) % (VIEW_W + 40)) - 20;
+    const y = ((rnd(i * 37 + 9) * 460 + clock * fall) % (WALL_BOT + 40)) - 20;
+    ctx.fillStyle = far ? "rgba(168,176,196,0.20)" : "rgba(198,206,224,0.34)";
+    ctx.fillRect(Math.round(x), Math.round(y), 1, far ? 1 : 2);
+  }
+}
+
+/* The moon is at a fixed point in SCREEN space (it is on the slowest layer
+   there is, so it may as well be nailed down), which means the side of a
+   building that faces it is knowable from x alone. One pixel of pale light down
+   that edge is what stops the silhouettes reading as holes punched in the sky.
+*/
+const MOON_X = 529;
+function moonRim(x, w, y, h, col) {
+  ctx.fillStyle = col;
+  const lit = (x + w / 2) < MOON_X ? x + w - 1 : x;
+  ctx.fillRect(lit, y, 1, h);
+}
+
 // Fewer and wider than the first pass: a building every 40px read as static.
 function drawSkyline() {                     // rate 1/16 -- furthest
   layerLoop(1 / 16, 240, (bx, id) => {
@@ -5386,18 +5761,47 @@ function drawSkyline() {                     // rate 1/16 -- furthest
       const w = 52 + Math.floor(rnd(id * 7 + b) * 34);
       const h = 44 + Math.floor(rnd(id * 13 + b) * 36);
       const x = bx + b * 80;
+      const top = 126 - h;
       ctx.fillStyle = "#1E2640";
-      ctx.fillRect(x, 126 - h, w, h);
+      ctx.fillRect(x, top, w, h);
       ctx.fillStyle = "#2A3350";          // roofline, catching the moon
-      ctx.fillRect(x, 126 - h, w, 2);
-      // A few far windows. Too small to blink -- at this distance they are
-      // specks of warmth that stop the silhouette reading as a hole punched in
-      // the sky.
-      ctx.fillStyle = "#6E6A58";
+      ctx.fillRect(x, top, w, 2);
+      moonRim(x, w, top, h, "rgba(140,152,190,0.22)");
+      /* ROOFTOP CLUTTER. Every building at this distance was a plain rectangle,
+         and a row of plain rectangles is a bar chart. A tank, a mast or a vent
+         box costs four rects and is the entire difference between a skyline and
+         a histogram -- silhouette is all there is to read at this size. */
+      const kit = Math.floor(rnd(id * 97 + b * 17) * 4);
+      const kx = x + 6 + Math.floor(rnd(id * 41 + b) * Math.max(1, w - 24));
+      if (kit === 0) {                       // water tank on legs
+        ctx.fillStyle = "#1A2138";
+        ctx.fillRect(kx, top - 9, 13, 7);
+        ctx.fillRect(kx + 1, top - 2, 2, 2); ctx.fillRect(kx + 10, top - 2, 2, 2);
+      } else if (kit === 1) {                // mast, with a lamp on top
+        ctx.fillStyle = "#1A2138"; ctx.fillRect(kx + 3, top - 14, 1, 14);
+        ctx.fillRect(kx, top - 6, 7, 1);
+        // Aircraft warning light, slow and out of phase per building.
+        if (Math.floor(clock * 1.3 + rnd(id * 7 + b) * 4) % 3 === 0) {
+          ctx.fillStyle = "#FF6A5A"; ctx.fillRect(kx + 3, top - 15, 1, 1);
+        }
+      } else if (kit === 2) {                // stair head / vent box
+        ctx.fillStyle = "#222A45"; ctx.fillRect(kx, top - 6, 16, 6);
+        ctx.fillStyle = "#1A2138"; ctx.fillRect(kx, top - 7, 16, 1);
+      }
+      // A few far windows. Specks of warmth, with the same spill as the closer
+      // ones at a third of the reach -- the bloom is what reads at this size,
+      // the 2x3 rectangle underneath it barely does.
       for (let i = 0; i < 3; i++) {
         if (6 + i * 14 + 2 > w) break;
-        if (rnd(id * 53 + b * 9 + i) < 0.45) continue;
-        ctx.fillRect(x + 6 + i * 14, 126 - h + 10 + (i % 2) * 12, 2, 3);
+        const key = id * 53 + b * 9 + i;
+        if (rnd(key) < 0.45) continue;
+        const wx = x + 6 + i * 14, wy = top + 10 + (i % 2) * 12;
+        ctx.globalCompositeOperation = "lighter";
+        ctx.fillStyle = "rgba(230,214,150,0.055)";
+        ctx.fillRect(wx - 2, wy - 2, 6, 7);
+        ctx.globalCompositeOperation = "source-over";
+        ctx.fillStyle = "#8C8468";
+        ctx.fillRect(wx, wy, 2, 3);
       }
     }
   });
@@ -5409,10 +5813,36 @@ function drawMidBuildings() {                // rate 1/8
       const w = 66 + Math.floor(rnd(id * 5 + b) * 38);
       const h = 66 + Math.floor(rnd(id * 11 + b) * 54);
       const x = bx + b * 128;
+      const top = 176 - h;
       ctx.fillStyle = "#283152";
-      ctx.fillRect(x, 176 - h, w, h);
+      ctx.fillRect(x, top, w, h);
       ctx.fillStyle = "#1B223A";
-      ctx.fillRect(x, 176 - h, w, 3);
+      ctx.fillRect(x, top, w, 3);
+      moonRim(x, w, top, h, "rgba(164,178,214,0.26)");
+      /* A CORNICE every four storeys. Without it the window grid is the only
+         horizontal information on an 80x120 slab, and the facade reads as
+         graph paper. With it the building has floors. */
+      for (let cy = top + 4 + 34; cy < 176; cy += 34) {
+        ctx.fillStyle = "rgba(20,26,44,0.55)";
+        ctx.fillRect(x, cy, w, 1);
+      }
+      // Rooftop kit, bigger than the skyline's because this layer is closer.
+      const mk = Math.floor(rnd(id * 89 + b * 23) * 3);
+      const mx = x + 8 + Math.floor(rnd(id * 47 + b) * Math.max(1, w - 30));
+      if (mk === 0) {
+        ctx.fillStyle = "#1F2742"; ctx.fillRect(mx, top - 12, 18, 10);
+        ctx.fillStyle = "#171E34";
+        ctx.fillRect(mx + 2, top - 2, 3, 2); ctx.fillRect(mx + 13, top - 2, 3, 2);
+        ctx.fillRect(mx, top - 13, 18, 1);
+      } else if (mk === 1) {
+        ctx.fillStyle = "#1F2742";
+        ctx.fillRect(mx + 5, top - 20, 2, 20);
+        ctx.fillRect(mx + 1, top - 12, 10, 1);
+        ctx.fillRect(mx + 2, top - 7, 8, 1);
+        if (Math.floor(clock * 1.1 + rnd(id * 5 + b) * 5) % 3 === 0) {
+          ctx.fillStyle = "#FF6A5A"; ctx.fillRect(mx + 5, top - 22, 2, 2);
+        }
+      }
       // Window seeds are keyed to (id, b, row, col) -- NEVER to the screen x.
       // Keying them to screen position re-rolled every window on every camera
       // move, which is why the lights appeared to strobe whenever you walked.
@@ -5420,18 +5850,10 @@ function drawMidBuildings() {                // rate 1/8
       for (let wy = 176 - h + 11; wy < 170; wy += 17, wi++) {
         let wj = 0;
         for (let wx = x + 8; wx < x + w - 8; wx += 15, wj++) {
-          const key = id * 977 + b * 71 + wi * 13 + wj;
-          const base = rnd(key) > 0.45;
-          // Only about one window in six ever toggles, and slowly, so the
-          // facade reads as "a few lights change" rather than a re-roll.
-          const blinker = rnd(key * 7 + 3) > 0.82;
-          const phase = Math.floor(clock / 3.5 + rnd(key * 11) * 9);
-          const lit = blinker ? rnd(key * 3 + phase * 17) > 0.45 : base;
-          // Warm and bright: after dark the windows are the light source, so
-          // they have to be the brightest thing in the frame. The unlit ones go
-          // nearly to the facade colour instead of standing out as grey holes.
-          ctx.fillStyle = lit ? "#FFD98A" : "#1E2742";
-          ctx.fillRect(wx, wy, 5, 7);
+          // Seeded per (id, b, row, col) -- never from the screen x. The
+          // classes, the slow blinkers, the television flicker, the spill and
+          // the occupants all live in drawWindow().
+          drawWindow(wx, wy, 5, 7, id * 977 + b * 71 + wi * 13 + wj, true);
         }
       }
     }
@@ -5520,14 +5942,46 @@ function drawNearWall() {                    // rate 1/4 -- the alley wall
     // with the playfield tiles in front of it.
     ctx.fillStyle = "#7A6A5E";
     ctx.fillRect(bx, TOP, 96, BOT - TOP);
-    // Brick: 7x3 courses with 1px mortar, which tiles exactly inside 16px.
-    ctx.fillStyle = "#635A52";
-    for (let y = TOP; y < BOT; y += 4) ctx.fillRect(bx, y, 96, 1);
+    /* Brick, now at HALF-UNIT mortar. A one-unit joint is two device pixels
+       wide at RENDER_SCALE 2, and two pixels of mortar around a 7x3 brick is a
+       grid, not masonry -- it was the single biggest reason the largest surface
+       on screen read as low resolution. A half-unit joint is one device pixel,
+       which the 640x360 buffer could not draw at all.
+
+       The freed contrast goes into a highlight on the top edge of each course
+       and a shadow under it, so a brick has a top and a bottom. That is the
+       detail: same geometry, three times the information per course. */
+    const jw = 1 / RENDER_SCALE;
     for (let y = TOP, r = 0; y < BOT; y += 4, r++) {
-      for (let x = bx + (r % 2 ? 0 : 4); x < bx + 96; x += 8) ctx.fillRect(x, y, 1, 4);
+      ctx.fillStyle = "#57504A";                     // the bed joint
+      ctx.fillRect(bx, y, 96, jw);
+      ctx.fillStyle = "rgba(190,178,166,0.16)";      // light catching the arris
+      ctx.fillRect(bx, y + jw, 96, jw);
+      ctx.fillStyle = "rgba(24,20,18,0.20)";         // shadow under the course
+      ctx.fillRect(bx, y + 4 - jw, 96, jw);
+      // Perpends, offset half a brick on alternate courses.
+      ctx.fillStyle = "#57504A";
+      for (let x = bx + (r % 2 ? 0 : 4); x < bx + 96; x += 8) {
+        ctx.fillRect(x, y, jw, 4);
+      }
     }
+    /* MOONLIT COPING, then a fall-off down the face. The wall was one flat
+       tone from the coping to the ground, which is the main reason it read as
+       sixty per cent of the screen doing nothing: a surface with no light on it
+       has no form. The light comes from the sky, so the top is the lit part and
+       the bottom of the alley is where it runs out -- four flat steps, because
+       a gradient bands under nearest-neighbour upscaling and the bands crawl.
+       Flat steps stay put. */
     ctx.fillStyle = "#8C8076";
     ctx.fillRect(bx, TOP, 96, 3);
+    ctx.fillStyle = "#A2958A";                 // the lit edge itself
+    ctx.fillRect(bx, TOP, 96, 1);
+    const FALL = 4, span = BOT - TOP;
+    for (let i = 1; i <= FALL; i++) {
+      ctx.fillStyle = "rgba(10,10,18," + (0.055 * i).toFixed(3) + ")";
+      ctx.fillRect(bx, TOP + Math.round(span * (0.35 + 0.65 * (i - 1) / FALL)),
+                   96, Math.ceil(span * 0.65 / FALL) + 1);
+    }
 
     // Four dressings chosen by a hash of the panel index, so the wall does not
     // read as one motif repeating every 192px.
@@ -5550,9 +6004,19 @@ function drawNearWall() {                    // rate 1/4 -- the alley wall
         const on = Math.floor(clock + rnd(id) * 4) % 5 !== 4;
         const core = hue ? (on ? "#FF8ACB" : "#6B4358") : (on ? "#6BE3FF" : "#3E5C66");
         const litc = hue ? (on ? "#FFD3EC" : "#7E5266") : (on ? "#CFF6FF" : "#4E6E78");
-        ctx.fillStyle = "rgba(" + (hue ? "255,120,190," : "110,220,255,") +
-                        (on ? 0.18 : 0.05) + ")";
-        ctx.fillRect(nx - 8, ny - 8, 52, 40);
+        /* The sign had a flat tinted rectangle behind it standing in for a
+           glow, which is a lit box, not a light. Additive rings instead: they
+           ADD to the brick they sit on, so the wall itself brightens and the
+           spill fades into it. Same reason the windows changed. */
+        const nglow = hue ? "255,120,190" : "110,220,255";
+        ctx.globalCompositeOperation = "lighter";
+        for (let g = quality >= Q_FULL ? 0 : 2; g < 3; g++) {
+          const pad = 16 - g * 6;
+          ctx.fillStyle = "rgba(" + nglow + "," +
+                          ((on ? 0.055 : 0.014) * (g + 1)).toFixed(3) + ")";
+          ctx.fillRect(nx - pad, ny - pad, 36 + pad * 2, 24 + pad * 2);
+        }
+        ctx.globalCompositeOperation = "source-over";
         ctx.fillStyle = "#2A1420"; ctx.fillRect(nx - 2, ny - 2, 40, 28);
         ctx.fillStyle = core; ctx.fillRect(nx, ny, 36, 24);
         ctx.fillStyle = litc;
@@ -5582,6 +6046,59 @@ function drawNearWall() {                    // rate 1/4 -- the alley wall
         ctx.fillStyle = "#C9A24A"; ctx.fillRect(dx + 23, BOT - dh + 26, 3, 3);
         break;
       }
+    }
+
+    /* PAPER LANTERNS. The alley had exactly two light sources on it -- the
+       moon and a neon sign every fourth panel -- and neither is warm or low.
+       A lantern hung at head height puts a warm pool on the brick right where
+       the player is, which is both the thing that makes the wall read as an
+       inhabited alley and the thing that makes the ninja's blue gi sit against
+       something other than grey.
+
+       One panel in three, and the flame breathes: two sine terms at
+       incommensurable rates so it never settles into a visible loop. */
+    if (rnd(id * 17 + 7) > 0.66) {
+      const lx = bx + 10 + Math.floor(rnd(id * 23) * 60);
+      const ly = TOP + 22 + Math.floor(rnd(id * 31) * 20);
+      const breathe = 0.80 + 0.20 * Math.sin(clock * 3.1 + rnd(id * 5) * 6)
+                           * Math.sin(clock * 1.7 + rnd(id * 9) * 6);
+      ctx.globalCompositeOperation = "lighter";
+      for (let g = quality >= Q_FULL ? 0 : 2; g < 3; g++) {
+        const r = 26 - g * 8;
+        ctx.fillStyle = "rgba(255,168,96," + (0.045 * (g + 1) * breathe).toFixed(3) + ")";
+        ctx.fillRect(lx - r + 4, ly - r + 6, r * 2, r * 2);
+      }
+      ctx.globalCompositeOperation = "source-over";
+      ctx.fillStyle = "#2A211A";                       // the cord
+      ctx.fillRect(lx + 4, TOP + 3, 1, ly - TOP - 3);
+      ctx.fillStyle = "#A8321E"; ctx.fillRect(lx, ly, 10, 12);     // paper
+      ctx.fillStyle = "#C94A2A"; ctx.fillRect(lx + 1, ly + 1, 8, 10);
+      ctx.fillStyle = "#FFCE7A"; ctx.fillRect(lx + 3, ly + 4, 4, 5); // the flame
+      ctx.fillStyle = "#2A211A";
+      ctx.fillRect(lx, ly - 1, 10, 1); ctx.fillRect(lx, ly + 12, 10, 1);
+    }
+
+    /* STEAM from a vent at the foot of the wall. Drifts on `clock` and not on
+       the camera, for the same reason the fog does: it has to keep moving when
+       the player stops. Drawn additively so it picks up whatever light is
+       nearby rather than sitting on the brick as grey paint. */
+    if (rnd(id * 41 + 13) > 0.72) {
+      const vx = bx + 30 + Math.floor(rnd(id * 19) * 40);
+      ctx.fillStyle = "#3A3128";
+      ctx.fillRect(vx, BOT - 26, 16, 10);
+      ctx.fillStyle = "#26201A";
+      for (let i = 0; i < 4; i++) ctx.fillRect(vx + 2 + i * 4, BOT - 24, 2, 6);
+      ctx.globalCompositeOperation = "lighter";
+      for (let p = 0; p < 4; p++) {
+        // Each puff rises on its own phase, widening and fading as it goes.
+        const u = ((clock * 0.42 + p * 0.25 + rnd(id * 7 + p)) % 1);
+        const py = BOT - 26 - u * 46;
+        const pw = 5 + Math.round(u * 13);
+        ctx.fillStyle = "rgba(186,196,214," + (0.085 * (1 - u)).toFixed(3) + ")";
+        ctx.fillRect(vx + 8 - (pw >> 1) + Math.round(Math.sin(u * 4 + p) * 4),
+                     Math.round(py), pw, 4 + Math.round(u * 4));
+      }
+      ctx.globalCompositeOperation = "source-over";
     }
 
     // Tagged on EVERY panel, and two on some of them. Before this the graffiti
@@ -5646,7 +6163,7 @@ function drawGoal() {
   ctx.fillStyle = "#FFD24A";
   ctx.fillRect(gx + 29, gy - 79, 16, 3);
   ctx.fillRect(gx + 29, gy - 74, 16, 3);
-  drawText("GOAL", gx + 18, gy - 118, "#FFE45E", 2);
+  drawTextHD("GOAL", gx + 18, gy - 118, "#FFE45E", 3);
 }
 
 function drawProps() {                       // foreground clutter, world space
@@ -5807,15 +6324,25 @@ function windupSteel(cx, cy, dir, w, rx, ry, start, cols) {
 
    The column matters too. A dive pushes off sideways (PERCH_DIVE_VX), so it
    comes down BESIDE the structure, not through it -- the column to check is the
-   one it drifts into. Solid rows are then skipped before the search starts, so
-   a wide platform does not report its own surface as the floor. */
+   one it drifts into.
+
+   The fourth wrong answer was skipping solid rows before searching, to stop a
+   wide platform reporting its own surface as the floor. On a 2-tile cover block
+   whose neighbouring column is ALSO covered, that skipped the block, the alley
+   floor beneath it and the row under that, ran off the bottom of the grid and
+   returned "no floor" -- which drew a drop shaft from the roof to the bottom of
+   the screen and a landing pad off the edge of the world.
+
+   The honest rule is the plain one: the first solid row at or below the feet in
+   the drift column. If that IS the feet row, the structure continues and the
+   drop is zero-height, which the caller draws as a pad and no shaft. Over a pit
+   the alley floor line is the best guess available. */
 function diveTargetOf(e) {
   const cx = e.x + e.w / 2 + (e.diveDir || -1) * 16;
   const tx = Math.max(0, Math.min(COLS - 1, Math.floor(cx / TILE)));
-  let r = Math.floor((e.y + e.h) / TILE);
-  while (r < ROWS && solidAt(tx, r)) r++;       // through whatever it stands on
-  for (; r < ROWS; r++) if (solidAt(tx, r)) return { cx: cx, row: r };
-  return { cx: cx, row: -1 };
+  const feetRow = Math.floor((e.y + e.h) / TILE);
+  for (let r = feetRow; r < ROWS; r++) if (solidAt(tx, r)) return { cx: cx, row: r };
+  return { cx: cx, row: ROWS - 2 };
 }
 
 function drawEnemyWeapon(e) {
@@ -5841,9 +6368,13 @@ function drawEnemyWeapon(e) {
          of brick, invisible, while the pad sat under its boots. The drop drifts
          sideways, so the warning belongs where the drop ends. */
       const tgt = diveTargetOf(e);
-      const gy = tgt.row < 0 ? WORLD_H : tgt.row * TILE;
-      hazardPreview(tgt.cx - e.w / 2 - cam.x, feet - cam.y, e.w,
-                    Math.max(8, gy - feet), w, "255,150,120");
+      const gy = tgt.row * TILE;
+      // No shaft when there is nothing to fall through: the pad alone says
+      // "here", and eight pixels of hatching inside a cover block says nothing.
+      if (gy - feet > 4) {
+        hazardPreview(tgt.cx - e.w / 2 - cam.x, feet - cam.y, e.w,
+                      gy - feet, w, "255,150,120");
+      }
       ctx.fillStyle = "rgba(255,160,120," + (0.30 + w * 0.5).toFixed(3) + ")";
       ctx.fillRect(Math.round(tgt.cx - e.w / 2 - 5 - cam.x),
                    Math.round(gy - 2 - cam.y), e.w + 10, 2);
@@ -5975,7 +6506,22 @@ function drawEntities() {
   }
 
   for (const e of enemies) {
-    if (!e.alive || !onScreen(e)) continue;
+    if (!onScreen(e)) continue;
+    /* THE IMPACT FRAME. Two frames of flat white in the shape the body was in,
+       drawn after it is already dead and before the burst has spread. The
+       oldest trick in fighting games and still the cheapest way to make a hit
+       land: the eye reads the silhouette change as the moment of contact, so
+       the hit has a frame of its own instead of the body simply ceasing to be
+       drawn. Run-coalesced, so it costs about forty rects. */
+    if (!e.alive) {
+      if (e.impact > 0) {
+        const ip = ENEMY_POSES[e.kind][enemyPoseOf(e)] || ENEMY_POSES[e.kind].base;
+        drawSilhouette(ip, Math.round(e.x - cam.x - (SPRITE_W - ENEMY_W) / 2),
+                       Math.round(e.y + ENEMY_H - NINJA_ROWS * CELL_NINJA - cam.y),
+                       e.facing === -1, "#FFFFFF", CELL_NINJA);
+      }
+      continue;
+    }
     const pal = e.kind === "charger" ? P_CHARGER
               : e.kind === "rusher"  ? P_RUSHER : P_WARDEN;
     const poseName = enemyPoseOf(e);
@@ -6232,70 +6778,138 @@ function timeText(sec) {
   return String(mm).padStart(2, "0") + ":" + String(ss).padStart(2, "0");
 }
 
-function drawHud() {
-  // Backing plates: the sky is bright, so unbacked text washes out.
-  const flagStr = "FLAG " + flagsTaken + "/" + flags.length;
-  const fw = textWidth(flagStr, 2);
-  const fx = VIEW_W - 14 - fw;
-  ctx.fillStyle = "rgba(12,14,22,0.60)";
-  ctx.fillRect(4, 4, 152, 40);
-  ctx.fillRect(fx - 20, 4, fw + 34, 40);
-  ctx.fillStyle = "#2B2622"; ctx.fillRect(fx - 15, 8, 2, 22);
-  ctx.fillStyle = "#D62E3F"; ctx.fillRect(fx - 13, 9, 11, 9);
-  ctx.fillStyle = "#FFD24A";
-  ctx.fillRect(fx - 13, 12 + (Math.floor(clock * 5) % 2), 8, 2);
+/* THE READOUT, at device-pixel density.
+   Everything here used to be drawn with the 3x5 font. Fifteen pixels per
+   character is enough for a label and not enough for a NUMBER you read at a
+   glance mid-jump -- every stroke is the same weight as the gaps inside it, so
+   "014250" arrives as texture rather than as digits. That is what looked
+   low-resolution, and it was: upscaling cannot add detail nobody drew.
 
-  /* One icon and a number. Three lit-or-unlit slots worked when the maximum
-     was three; at ten it would be a row of eighty pixels of pips that nobody
-     can count at a glance, and the thing you need to know mid-fight is "do I
-     have any" followed by "roughly how many". The count goes amber under three
-     and red at zero so the first question is answered by colour alone. */
-  drawShurikenIcon(9, 9, 10, Math.floor(clock * 8) % 2 === 0);
+   With RENDER_SCALE in place there are four times the pixels available, so this
+   is rebuilt on the 5x7 font with:
+     - hairline plate borders, one DEVICE pixel wide (half a world unit), which
+       the old buffer literally could not express
+     - labels at 2px cells and values at 3-4px, so the hierarchy is carried by
+       weight rather than by colour alone
+     - plates sized from the text they contain rather than from magic numbers,
+       so a wider value cannot overrun its own background any more            */
+
+// A plate with a hairline edge and a brighter top lip, so a panel reads as a
+// physical card over the alley rather than as a hole cut in it.
+function hudPlate(x, y, w, h) {
+  const hair = 1 / RENDER_SCALE;
+  ctx.fillStyle = "rgba(10,12,20,0.68)";
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = "rgba(150,170,205,0.20)";
+  ctx.fillRect(x, y, w, hair);
+  ctx.fillRect(x, y + h - hair, w, hair);
+  ctx.fillRect(x, y, hair, h);
+  ctx.fillRect(x + w - hair, y, hair, h);
+  ctx.fillStyle = "rgba(190,210,240,0.10)";
+  ctx.fillRect(x + hair, y + hair, w - hair * 2, hair);
+}
+
+function drawHud() {
+  const hair = 1 / RENDER_SCALE;
+
+  /* LEFT: what you are carrying and what is left of you. */
+  const LW = 150, LH = 46;
+  hudPlate(4, 4, LW, LH);
+  /* The count has no "x" in front of it any more. The shuriken icon is itself
+     an X-shaped star and the font has no lower case, so "x6" rendered as "X6"
+     immediately to the right of it and the row read "✕ ✕6". */
+  drawShurikenIcon(9, 9, 11, Math.floor(clock * 8) % 2 === 0);
   const ammoCol = shurikenAmmo === 0 ? "#FF6A5A"
-                : shurikenAmmo <= 2 ? "#FFC24A" : "#E9EDF2";
-  drawText("x" + shurikenAmmo, 22, 10, ammoCol, 1);
-  drawText(shurikenAmmo >= SHURIKEN_MAX ? "SHURIKEN FULL" : "SHURIKEN-C",
-           44, 10, shurikenAmmo >= SHURIKEN_MAX ? "#8FE38A" : "#C9D2E0", 1);
-  drawText("BLADE-X", 9, 24, "#9FD0FF", 1);
-  // Lives as pips. A number you have to read is the wrong shape for something
-  // you check in the middle of a jump.
-  drawText("LIFE", 9, 34, "#C9D2E0", 1);
+                : shurikenAmmo <= 2 ? "#FFC24A" : "#EAF0F8";
+  drawTextHD(String(shurikenAmmo), 24, 9, ammoCol, 4);
+  const ammoEnd = 24 + textWidthHD(String(shurikenAmmo), 4) + 3;
+  drawTextHD(shurikenAmmo >= SHURIKEN_MAX ? "FULL" : "SHURIKEN", ammoEnd, 11,
+             shurikenAmmo >= SHURIKEN_MAX ? "#8FE38A" : "#8E9AAD", 2);
+  // The key each weapon is on, boxed: a key is a thing you press, and a bare
+  // letter sitting in a line of prose is not.
+  hudKey(ammoEnd + textWidthHD(shurikenAmmo >= SHURIKEN_MAX ? "FULL" : "SHURIKEN", 2) + 2,
+         10, "C");
+
+  drawTextHD("BLADE", 9, 24, "#9FD0FF", 2);
+  hudKey(9 + textWidthHD("BLADE", 2) + 2, 23, "X");
+  const dashX = 62;
+  drawTextHD("DASH", dashX, 24, ninja.dashCd > 0 ? "#5C6579" : "#9FD0FF", 2);
+  hudKey(dashX + textWidthHD("DASH", 2) + 2, 23, "S");
+  /* The dash cooldown is an UNDERLINE beneath its own label, not a bar parked
+     off to one side -- floating loose it read as a stray green line rather than
+     as the state of that key. What matters is "is it back yet", which an
+     underline answers without being read. */
+  const cdw = textWidthHD("DASH", 2) - 1;
+  ctx.fillStyle = "rgba(255,255,255,0.16)";
+  ctx.fillRect(dashX, 32, cdw, hair * 2);
+  const cdk = ninja.dashCd > 0 ? 1 - ninja.dashCd / (DASH_TIME + DASH_CD) : 1;
+  ctx.fillStyle = cdk >= 1 ? "#8FE38A" : "#FFC24A";
+  ctx.fillRect(dashX, 32, Math.round(cdw * cdk * RENDER_SCALE) / RENDER_SCALE, hair * 2);
+
+  // Lives as pips, kills as a number: one you check without reading it, the
+  // other you only look at between fights.
+  drawTextHD("LIFE", 9, 36, "#8E9AAD", 2);
   for (let i = 0; i < START_LIVES; i++) {
     const held = i < lives;
-    ctx.fillStyle = held ? "#E8563F" : "#3C4354";
-    ctx.fillRect(26 + i * 9, 34, 7, 6);
-    if (held) { ctx.fillStyle = "#F2C79B"; ctx.fillRect(28 + i * 9, 36, 3, 2); }
+    ctx.fillStyle = held ? "#E8563F" : "#333A4A";
+    ctx.fillRect(34 + i * 9, 35, 7, 7);
+    ctx.fillStyle = held ? "rgba(255,210,170,0.85)" : "rgba(255,255,255,0.06)";
+    ctx.fillRect(34 + i * 9, 35, 7, hair);
+    if (held) { ctx.fillStyle = "#F7D2AC"; ctx.fillRect(36 + i * 9, 37, 2, 2); }
   }
-  drawText("KILL " + kills, 58, 34, "#FFE2B0", 1);
-  drawText(flagStr, fx, 10, flagsTaken >= flags.length ? "#9CFF7A" : "#FFE45E", 2);
-  drawText("COLLECT ALL", fx, 26, "#C9D2E0", 1);
+  drawTextHD("KILL", 66, 36, "#8E9AAD", 2);
+  drawTextHD(String(kills), 66 + textWidthHD("KILL", 2) + 3, 36, "#FFE2B0", 2);
 
-  // Score and run clock share one centred plate, score on the left. This
-  // replaced a stage-progress bar: the bar reported how far along the alley you
-  // were, which the scrolling background already tells you. Both readouts are
-  // zero-padded to a fixed width so the plate never jitters as they climb.
+  /* CENTRE: the two numbers the run is scored on. */
   const sStr = String(Math.min(999999, score)).padStart(6, "0");
   const tStr = timeText(playTime);
-  const sw = textWidth(sStr, 2), tw = textWidth(tStr, 3);
-  const bw = 30 + sw + 14 + 26 + tw + 8;
-  const bx = Math.round((VIEW_W - bw) / 2);
-  ctx.fillStyle = "rgba(12,14,22,0.60)";
-  ctx.fillRect(bx, 4, bw, 34);
-  drawText("SCORE", bx + 6, 13, "#C9D2E0", 1);
-  drawText(sStr, bx + 30, 11, "#9CFF7A", 2);
-  const tx = bx + 30 + sw + 14;
-  ctx.fillStyle = "rgba(255,228,94,0.25)";
-  ctx.fillRect(tx - 7, 7, 1, 18);            // divider between the two
-  drawText("TIME", tx, 13, "#C9D2E0", 1);
-  drawText(tStr, tx + 26, 9, "#FFE45E", 3);
-  // Once you have died, the figure the bonus is actually charged against is
-  // shown underneath. Without it a bonus that shrank after a death would look
-  // arbitrary, because the clock above it went back to zero.
+  const sw = textWidthHD(sStr, 4), tw = textWidthHD(tStr, 4);
+  const lblS = textWidthHD("SCORE", 2), lblT = textWidthHD("TIME", 2);
+  const CW = 12 + lblS + 4 + sw + 14 + lblT + 4 + tw + 10;
+  const cx0 = Math.round((VIEW_W - CW) / 2);
+  hudPlate(cx0, 4, CW, deaths > 0 ? 40 : 30);
+  drawTextHD("SCORE", cx0 + 8, 12, "#8E9AAD", 2);
+  drawTextHD(sStr, cx0 + 8 + lblS + 4, 10, "#9CFF7A", 4);
+  const tx0 = cx0 + 8 + lblS + 4 + sw + 12;
+  ctx.fillStyle = "rgba(255,228,94,0.22)";
+  ctx.fillRect(tx0 - 6, 8, hair, 18);
+  drawTextHD("TIME", tx0, 12, "#8E9AAD", 2);
+  drawTextHD(tStr, tx0 + lblT + 4, 10, "#FFE45E", 4);
+  // Once you have died, the figure the bonus is charged against is shown
+  // underneath: the clock above it went back to zero and a bonus that shrank
+  // for no visible reason reads as a bug.
   if (deaths > 0) {
-    const total = "STAGE " + timeText(stageTotal);
-    drawText(total, bx + 6, 27,
-             stageTotal > stagePar() ? "#E8563F" : "#8E9AAD", 1);
+    drawTextHD("STAGE " + timeText(stageTotal) + "  PAR " + timeText(stagePar()),
+               cx0 + 8, 28, stageTotal > stagePar() ? "#E8563F" : "#8E9AAD", 2);
   }
+
+  /* RIGHT: the optional collection. */
+  const flagStr = flagsTaken + "/" + flags.length;
+  const RW = 20 + textWidthHD("FLAG", 2) + 4 + textWidthHD(flagStr, 3) + 10;
+  const rx0 = VIEW_W - 4 - RW;
+  hudPlate(rx0, 4, RW, 30);
+  ctx.fillStyle = "#2B2622"; ctx.fillRect(rx0 + 8, 8, hair * 2, 20);
+  ctx.fillStyle = "#D62E3F"; ctx.fillRect(rx0 + 9, 9, 9, 8);
+  ctx.fillStyle = "#FFD24A";
+  ctx.fillRect(rx0 + 9, 12 + (Math.floor(clock * 5) % 2), 7, 2);
+  drawTextHD("FLAG", rx0 + 22, 12, "#8E9AAD", 2);
+  drawTextHD(flagStr, rx0 + 22 + textWidthHD("FLAG", 2) + 4, 10,
+             flagsTaken >= flags.length ? "#9CFF7A" : "#FFE45E", 3);
+}
+
+/* A boxed key cap. Two device pixels of border and a 2px glyph -- at the old
+   resolution this was 6x10 of solid colour with no room for an outline, which
+   is why the controls were written out as prose in the debug overlay instead of
+   shown on the HUD where they belong. */
+function hudKey(x, y, ch) {
+  const hair = 1 / RENDER_SCALE;
+  const w = textWidthHD(ch, 2) - 1 + 4, h = 7 + 4;
+  ctx.fillStyle = "rgba(200,215,240,0.13)";
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = "rgba(200,215,240,0.32)";
+  ctx.fillRect(x, y, w, hair); ctx.fillRect(x, y + h - hair, w, hair);
+  ctx.fillRect(x, y, hair, h); ctx.fillRect(x + w - hair, y, hair, h);
+  drawTextHD(ch, x + 2, y + 2, "#DCE6F5", 2);
 }
 
 function drawDebug() {
@@ -6306,12 +6920,17 @@ function drawDebug() {
       "  POSE " + poseNameOf(ninja) + "  H " + ninja.h,
     "TILE " + Math.floor(ninja.x / TILE) + "/" + COLS + "  CAM " + cam.x +
       "  FOES " + enemies.filter(e => e.alive).length +
-      "/" + enemies.length + "  FX " + particles.length
+      "/" + enemies.length + "  FX " + particles.length,
+    "FRAME " + perfMean.toFixed(2) + "MS  WORST " + perfWorst.toFixed(2) +
+      "  BUDGET " + FRAME_BUDGET.toFixed(2) +
+      "  UPD " + perfUpd.toFixed(2) + "  DRAW " + perfRen.toFixed(2) +
+      "  Q " + (quality === Q_FULL ? "FULL" : quality === Q_REDUCED ? "REDUCED" : "MINIMAL")
   ];
   ctx.fillStyle = "rgba(12,14,22,0.58)";
-  ctx.fillRect(4, VIEW_H - 33, 8 + textWidth(lines[0], 1), 29);
+  ctx.fillRect(4, VIEW_H - 35, 8 + textWidthHD(lines[0], 1), 31);
   for (let i = 0; i < lines.length; i++) {
-    drawText(lines[i], 8, VIEW_H - 29 + i * 8, "#FFE2B0", 1);
+    drawTextHD(lines[i], 8, VIEW_H - 31 + i * 7,
+               i === 3 && perfWorst > FRAME_BUDGET ? "#FF9A78" : "#FFE2B0", 1);
   }
   for (const h of hazards) {
     ctx.fillStyle = "rgba(255,80,80,0.45)";
@@ -6350,9 +6969,12 @@ function drawButton(b, scale) {
   ctx.fillRect(b.x, b.y + b.h - 2, b.w, 2);
   ctx.fillRect(b.x, b.y, 2, b.h);
   ctx.fillRect(b.x + b.w - 2, b.y, 2, b.h);
-  drawText(b.label, b.x + (b.w - textWidth(b.label, scale)) / 2,
-           b.y + Math.round((b.h - FONT_H * scale) / 2),
-           on ? "#141018" : "#FFE45E", scale);
+  // The old 3x5 scale maps to an HD cell one step larger, which lands within a
+  // pixel of the same cap height with a great deal more detail in it.
+  const px = scale + 1;
+  drawTextHD(b.label, b.x + (b.w - textWidthHD(b.label, px)) / 2,
+             b.y + Math.round((b.h - FONT_HD_H * px / RENDER_SCALE) / 2),
+             on ? "#141018" : "#FFE45E", px);
 }
 
 function drawTitle() {
@@ -6364,16 +6986,16 @@ function drawTitle() {
   ctx.fillRect(84, VIEW_H - 40, VIEW_W - 168, 2);
 
   const t1 = "CLAWD JUMP";
-  drawText(t1, (VIEW_W - textWidth(t1, 5)) / 2, 58, "#FFE45E", 5);
+  drawTextHD(t1, (VIEW_W - textWidthHD(t1, 7)) / 2, 58, "#FFE45E", 7);
   const t2 = "ALLEY OF THE TEN FLAGS";
-  drawText(t2, (VIEW_W - textWidth(t2, 2)) / 2, 96, "#C9D2E0", 2);
+  drawTextHD(t2, (VIEW_W - textWidthHD(t2, 3)) / 2, 96, "#C9D2E0", 3);
 
   // A score attack with no record to beat has nothing to come back for.
   const rec = bestFor(STAGE_ID);
   if (rec.score > 0 || rec.time > 0) {
     const line = "BEST " + String(Math.min(999999, rec.score)).padStart(6, "0") +
                  (rec.time > 0 ? "    " + timeText(rec.time) : "");
-    drawText(line, (VIEW_W - textWidth(line, 2)) / 2, 112, "#9CFF7A", 2);
+    drawTextHD(line, (VIEW_W - textWidthHD(line, 3)) / 2, 112, "#9CFF7A", 3);
   }
 
   // He breathes on the title screen, so it never reads as a still image.
@@ -6382,21 +7004,25 @@ function drawTitle() {
 
   drawButton(BTN_START, 3);
 
+  /* Three rows now, not two: the dash is on this list because a move nobody is
+     told about is a move nobody uses, and it is the only control that is not
+     also written on the HUD. */
   const legend = ["Z JUMP    X BLADE    C SHURIKEN",
+                  "SHIFT OR A - DASH",
                   "SPACE PAUSE    R RESTART    M MUTE"];
   for (let i = 0; i < legend.length; i++)
-    drawText(legend[i], (VIEW_W - textWidth(legend[i], 2)) / 2, 254 + i * 16,
-             "#8E9AAD", 2);
+    drawTextHD(legend[i], (VIEW_W - textWidthHD(legend[i], 3)) / 2, 248 + i * 15,
+             i === 1 ? "#9FD0FF" : "#8E9AAD", 3);
   const hint = "CLICK START OR PRESS SPACE";
   if (Math.floor(clock * 1.6) % 2)
-    drawText(hint, (VIEW_W - textWidth(hint, 2)) / 2, VIEW_H - 62, "#FFE2B0", 2);
+    drawTextHD(hint, (VIEW_W - textWidthHD(hint, 3)) / 2, VIEW_H - 62, "#FFE2B0", 3);
 }
 
 function drawPause() {
   ctx.fillStyle = "rgba(8,10,16,0.74)";
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   const t1 = "PAUSED";
-  drawText(t1, (VIEW_W - textWidth(t1, 4)) / 2, 92, "#FFE45E", 4);
+  drawTextHD(t1, (VIEW_W - textWidthHD(t1, 5)) / 2, 92, "#FFE45E", 5);
   drawButton(BTN_RESUME, 2);
   drawButton(BTN_RESTART, 2);
   const rows = ["SCORE " + score,
@@ -6404,10 +7030,10 @@ function drawPause() {
                 "FLAGS " + flagsTaken + " / " + flags.length,
                 "KILLS " + kills + "    DEATHS " + deaths];
   for (let i = 0; i < rows.length; i++)
-    drawText(rows[i], (VIEW_W - textWidth(rows[i], 2)) / 2, 246 + i * 14,
-             "#FFE2B0", 2);
+    drawTextHD(rows[i], (VIEW_W - textWidthHD(rows[i], 3)) / 2, 246 + i * 14,
+             "#FFE2B0", 3);
   const hint = "SPACE RESUME";
-  drawText(hint, (VIEW_W - textWidth(hint, 2)) / 2, VIEW_H - 54, "#8E9AAD", 2);
+  drawTextHD(hint, (VIEW_W - textWidthHD(hint, 3)) / 2, VIEW_H - 54, "#8E9AAD", 3);
 }
 
 function drawGameOver() {
@@ -6418,9 +7044,9 @@ function drawGameOver() {
   ctx.fillRect(84, VIEW_H - 46, VIEW_W - 168, 2);
 
   const t1 = "GAME OVER";
-  drawText(t1, (VIEW_W - textWidth(t1, 5)) / 2, 62, "#E8563F", 5);
+  drawTextHD(t1, (VIEW_W - textWidthHD(t1, 7)) / 2, 62, "#E8563F", 7);
   const t2 = "ALL " + START_LIVES + " LIVES SPENT";
-  drawText(t2, (VIEW_W - textWidth(t2, 2)) / 2, 100, "#C9D2E0", 2);
+  drawTextHD(t2, (VIEW_W - textWidthHD(t2, 3)) / 2, 100, "#C9D2E0", 3);
 
   const rows = [
     "SCORE   " + score,
@@ -6432,23 +7058,56 @@ function drawGameOver() {
                   ninja.x / (GOAL_TILE * TILE) * 100))) + " PCT"
   ];
   for (let i = 0; i < rows.length; i++)
-    drawText(rows[i], (VIEW_W - textWidth(rows[0], 2)) / 2, 130 + i * 14,
-             "#FFE2B0", 2);
+    drawTextHD(rows[i], (VIEW_W - textWidthHD(rows[0], 3)) / 2, 130 + i * 14,
+             "#FFE2B0", 3);
 
   if (!canSkipGameOver()) return;
   drawButton(BTN_TITLE, 2);
   if (Math.floor(clock * 1.6) % 2) {
     const hint = "SPACE FOR TITLE    R TO RETRY";
-    drawText(hint, (VIEW_W - textWidth(hint, 2)) / 2, VIEW_H - 68, "#8E9AAD", 2);
+    drawTextHD(hint, (VIEW_W - textWidthHD(hint, 3)) / 2, VIEW_H - 68, "#8E9AAD", 3);
   }
 }
 
 function render() {
   applyScreenFilter();
+  // The ONE place the buffer scale is applied. Everything below this line is in
+  // world units and does not know the difference.
+  ctx.save();
+  ctx.scale(RENDER_SCALE, RENDER_SCALE);
+  renderWorld();
+  ctx.restore();
+}
+
+function renderWorld() {
+  /* THE SHAKE MOVES THE ACTION LAYER, NOT THE BACKGROUND.
+     Two reasons, and the first one is not taste. Every parallax layer is drawn
+     as full-width bands anchored to the screen; translate those a few pixels
+     and a strip of bare canvas opens along one edge, which reads as the picture
+     coming loose. The tiles are a world layer that already extends past the
+     view, so a shoved action layer reveals the wall behind it instead of
+     nothing.
+
+     The second reason is that it looks better. A shaken foreground against a
+     held sky is what a blow landing in front of the camera looks like; shaking
+     the sky too makes the CAMERA the thing that was hit. */
   drawSky();
   drawSkyline();
+  // Haze between the two distance bands, so the skyline sits BEHIND the mid
+  // buildings rather than beside them.
+  drawHazeBand(96, 30, "58,72,112");
   drawMidBuildings();
+  drawHazeBand(150, 26, "48,58,92");
+  drawFog();
   drawNearWall();
+  // Ash falls in front of the wall and behind the action, which is the only
+  // place it can be: in front of the tiles it veils the playfield, behind the
+  // wall it is invisible.
+  drawAsh();
+
+  const shx = shakeOffsetX(), shy = shakeOffsetY();
+  const shaking = shx !== 0 || shy !== 0;
+  if (shaking) { ctx.save(); ctx.translate(shx, shy); }
   drawTiles();
   drawGoal();
   drawProps();
@@ -6456,8 +7115,11 @@ function render() {
   drawGhosts();     // under the body: a trail in front of it reads as a smear
   drawNinja();      // drawn during "dying" too: the freeze frame IS the effect
   drawVaultMarkers();
-  drawLowAmmoWarning();
   drawParticles();
+  if (shaking) ctx.restore();
+  // Outside the shake: it is a HUD element pinned to the screen, and a warning
+  // that jitters with the world is harder to read exactly when it matters.
+  drawLowAmmoWarning();
 
   if (flash > 0) {
     ctx.fillStyle = "rgba(" + flashCol + "," + Math.min(0.75, flash * 1.8).toFixed(3) + ")";
@@ -6489,12 +7151,12 @@ function render() {
     ctx.fillRect(84, VIEW_H - 46, VIEW_W - 168, 2);
 
     const t1 = "STAGE CLEAR";
-    drawText(t1, (VIEW_W - textWidth(t1, 4)) / 2, 60, "#FFE45E", 4);
+    drawTextHD(t1, (VIEW_W - textWidthHD(t1, 5)) / 2, 60, "#FFE45E", 5);
     const t2 = "RANK " + rank;
-    drawText(t2, (VIEW_W - textWidth(t2, 3)) / 2, 98, rankCol, 3);
+    drawTextHD(t2, (VIEW_W - textWidthHD(t2, 4)) / 2, 98, rankCol, 4);
     if (newRecord && Math.floor(clock * 2.5) % 2) {
       const nr = "NEW RECORD";
-      drawText(nr, (VIEW_W - textWidth(nr, 2)) / 2, 122, "#9CFF7A", 2);
+      drawTextHD(nr, (VIEW_W - textWidthHD(nr, 3)) / 2, 122, "#9CFF7A", 3);
     }
 
     const rows = [
@@ -6508,7 +7170,7 @@ function render() {
     ];
     const widest = rows.reduce((a, b) => (b.length > a.length ? b : a), rows[0]);
     for (let i = 0; i < rows.length; i++) {
-      drawText(rows[i], (VIEW_W - textWidth(widest, 2)) / 2, 138 + i * 13, "#FFE2B0", 2);
+      drawTextHD(rows[i], (VIEW_W - textWidthHD(widest, 3)) / 2, 138 + i * 13, "#FFE2B0", 3);
     }
 
     // The ninja stands at the gate, scarf still fluttering.
@@ -6516,7 +7178,7 @@ function render() {
     drawPixels(endPose, (VIEW_W - SPRITE_W) / 2, 194, false, P_NINJA, CELL_NINJA);
 
     const t3 = "PRESS R TO RESTART";
-    drawText(t3, (VIEW_W - textWidth(t3, 2)) / 2, VIEW_H - 68, "#C9D2E0", 2);
+    drawTextHD(t3, (VIEW_W - textWidthHD(t3, 3)) / 2, VIEW_H - 68, "#C9D2E0", 3);
   }
 }
 
@@ -6533,10 +7195,21 @@ function frame(now) {
   last = now;
   if (dt > STEP * MAX_STEPS) dt = STEP * MAX_STEPS;
   acc += dt;
+  // performance.now() is absent in the headless harness, where the whole
+  // measurement is meaningless and must cost nothing.
+  const clk = typeof performance !== "undefined" && performance.now
+            ? () => performance.now() : null;
+  const t0 = clk ? clk() : 0;
   while (acc >= STEP) { update(STEP); acc -= STEP; }
   pumpMusic();
   updateCamera();
+  const t1 = clk ? clk() : 0;
   render();
+  if (clk) {
+    const t2 = clk();
+    perfUpd = t1 - t0; perfRen = t2 - t1;
+    perfSample(t2 - t0);
+  }
   requestAnimationFrame(frame);
 }
 

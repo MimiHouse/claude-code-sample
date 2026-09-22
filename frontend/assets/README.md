@@ -14,6 +14,16 @@ can replace one sound, or one sprite, and leave the rest alone.
 Assets are loaded over `fetch`, so they need the page **served over http**. On
 `file://` the loader gives up silently and the built-ins stay.
 
+```bash
+python3 -m http.server -d frontend 8000   # then open http://localhost:8000/
+```
+
+**The atlas path is verified headlessly.** `shot.mjs` decodes PNGs and honours
+`drawImage`, and it backs `fetch`/`Image` with this folder on disk -- so a shot
+shows the atlas rather than only the fallback, and a frame that is missing,
+mis-sized or mis-addressed is visible in a picture before anybody opens a
+browser. Drop your files in, run `node frontend/shot.mjs`, and look.
+
 ## `manifest.json`
 
 The only entry point. No manifest means no assets.
@@ -44,9 +54,20 @@ taking the atlas down with it.
 | Kind | Poses |
 | --- | --- |
 | `ninja` | `idle` `idleB` `jump` `walkA` `walkB` `walkC` `walkD` `throw` `draw` `slash` `land` `crouch` `crouchThrow` |
-| `charger` | `base` `walkA` `walkB` `walkC` `walkD` `attack` `lunge` |
-| `rusher` | `base` `walkA` `walkB` `walkC` `walkD` `leap` `wallGrab` `wallOver` |
-| `warden` | `base` `walkA` `walkB` `walkC` `walkD` `aim` `sweep` `duck` |
+| `charger` | `base` `walkA` `walkB` `walkC` `walkD` `attack` `lunge` `coil` |
+| `rusher` | `base` `walkA` `walkB` `walkC` `walkD` `leap` `wallGrab` `wallOver` `coil` |
+| `warden` | `base` `walkA` `walkB` `walkC` `walkD` `aim` `sweep` `duck` `coil` |
+
+`coil` is the crouch a LEDGE SENTRY makes before it drops on you and the crouch
+it absorbs the landing with. The built-in is **generated**, not drawn -- it is
+`base` put through `squat()`, which brings the torso down nine rows and leaves
+the feet where they were. Supply your own only if you want the sentry to read
+differently from a crouched version of the same enemy; leaving it out keeps the
+generated one, which already matches whichever kind is on the roof.
+
+That crouch is the ONLY warning a drop gets, so a replacement has to be
+unmistakably shorter than `base`. A `coil` frame that stands as tall as the
+standing pose removes the tell and leaves the dive unannounced.
 
 `wallGrab` and `wallOver` are the wall entrance, and they have a constraint the
 other poses do not: **while a vaulter peeks, only the sprite rows above the
@@ -107,6 +128,7 @@ add an `.m4a` fallback if you care about older Safari).
 | `deathSting` | the phrase that plays *after* it, filling the silence the music leaves. The built-in loop is cut dead on death, held voices and all, so this one is alone in the mix; it has to resolve inside the freeze (~1.05s) |
 | `flag` | flag collected |
 | `pickup` | shuriken ammunition picked up |
+| `dash` | the dash. It fires on a key the player may hold down through a whole alley, so it has to sit UNDER everything -- keep it unpitched cloth-and-air, or at this rate of repetition it is the sound people mute the game over |
 | `music` | the background loop |
 
 There is no `ninjutsu` cue any more. The screen-clearing strike it belonged to
