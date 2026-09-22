@@ -516,8 +516,17 @@ CAST = [
              # Two frames of it, not one. Snapping straight to the final frame
              # put a body flat on the ground two frames after the hit, which is
              # a corpse appearing rather than a body falling.
-             "falling":  ("Dead__", 3),
-             "down":     ("Dead__", 7),
+             # CHOSEN BY ASPECT RATIO, not by eye. A body on the ground is
+             # WIDE and SHORT; a body still falling is not. The death
+             # animations run a full ten frames each and the content aspect
+             # reports exactly where the body lands:
+             #   SamuraiHeavy  0.90 .. 0.58 .. 1.61   -> down at 9
+             #   SamuraiLight  0.75 .. 0.66 .. 1.74   -> down at 8
+             #   Ninja Girl    0.59 .. 1.51 (settles) -> down at 5
+             # The first pass used frame 6 for both samurai, which is 0.79 and
+             # 1.12 -- barely tipped over -- so the corpse read as standing.
+             "falling":  ("Dead__", 2),
+             "down":     ("Dead__", 5),
          }),
     # IRONCLAD: the heavy, and the reason a fourth pack was worth 46MB.
     # It used to be gameart2d's Knight -- plumed helm, round shield,
@@ -572,8 +581,8 @@ CAST = [
              "attack": ("Attack2H", 5),
              "lunge":  ("Attack2H", 2),
              "coil":   ("Alert2H", 0),
-             "falling": ("Die", 2),
-             "down":   ("Die", 6),
+             "falling": ("Die", 5),      # aspect 0.70, mid-fall
+             "down":   ("Die", 9),        # aspect 1.61, on the ground
          }),
     # GLAIVE: the thrower. It used to share the PLAYER's body -- three packs for
     # four characters -- separated only by colour, height and the fact that
@@ -602,8 +611,8 @@ CAST = [
              "sweep": ("Attack1H", 5),
              "duck":  ("Alert1H", 3),
              "coil":  ("Attack1H", 1),
-             "falling": ("Die", 2),
-             "down":  ("Die", 6),
+             "falling": ("Die", 4),      # aspect 0.84, mid-fall
+             "down":  ("Die", 8),         # aspect 1.74, on the ground
          }),
 ]
 

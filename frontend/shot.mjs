@@ -800,7 +800,8 @@ shoot("shot-credits.png", () => {
 // Each of these is held at the frame its own thing is legible in, because the
 // cut lasts five frames and the collapse lasts thirty-five: no single still
 // shows both.
-[["blade", true, 2], ["shuriken", false, 7], ["settle", true, 26]]
+// The window is shorter now (0.40s / 0.30s), so the frames moved with it.
+[["blade", true, 2], ["shuriken", false, 5], ["settle", true, 16]]
   .forEach(([name, blade, frames]) => {
     shoot("shot-kill-" + name + ".png", () => {
       t.restart(); t.wakeT = 0; t.cam.y = t.CAM_Y;
@@ -830,3 +831,44 @@ shoot("shot-credits.png", () => {
                   ` rest=${t.particles.filter(p => p.rest).length}`);
     });
   });
+
+// --- 19. killed in mid-air ------------------------------------------------
+// A body killed off the ground used to lie down in the air it happened to be
+// occupying. The collapse interpolates the FEET from where it died to the
+// surface underneath, so it falls to the floor and settles there.
+shoot("shot-kill-air.png", () => {
+  t.restart(); t.wakeT = 0; t.cam.y = t.CAM_Y;
+  // A sentry, put mid-dive well above the floor, then cut down.
+  let s = null;
+  for (const e of t.enemies) {
+    if (!s && e.ledge && e.x > 20 * t.TILE && e.x < 120 * t.TILE) { s = e; continue; }
+    e.alive = false;
+  }
+  t.ninja.x = s.x - 40; t.ninja.y = 20 * t.TILE - t.BODY_H;
+  t.ninja.onGround = true; t.ninja.facing = 1; t.ninja.invuln = 999;
+  t.snapCamera();
+  /* Moved over OPEN floor first. Left where it was, the body landed on the
+     walkway two tiles beneath it -- which is correct behaviour and a poor
+     picture of it, because the fall was four pixels. */
+  let col = -1;
+  for (let c = Math.floor(s.x / t.TILE); c < t.COLS - 2; c++) {
+    if (t.solidAt(c, 20) && !t.solidAt(c, 16) && !t.solidAt(c, 18)) { col = c; break; }
+  }
+  s.x = col * t.TILE;
+  t.ninja.x = s.x - 40; t.snapCamera();
+  s.state = "dive"; s.diveDir = -1; s.vy = 180;
+  s.y = 13 * t.TILE;                       // clear of the floor by four tiles
+  const startFeet = s.y + s.h;
+  t.killEnemy(s, true, -1);
+  // Far enough in that it has LANDED: the point of the shot is where the body
+  // ends up, not that it is falling.
+  for (let i = 0, moved = 0; i < 200 && moved < 14; i++) {
+    const before = s.dying;
+    t.ninja.invuln = 999;
+    t.update(t.STEP);
+    if (s.dying !== before) moved++;
+  }
+  t.playTime = 55; t.score = 9400;
+  console.log(`   air kill: feet ${startFeet} -> rest ${s.restFeet}` +
+              ` (floor is ${20 * t.TILE}), dying ${s.dying.toFixed(3)}`);
+});
